@@ -1,0 +1,486 @@
+{
+  "info": {
+    "_postman_id": "5711126d-84bd-4f4d-9331-b116873018de",
+    "name": "Saúde na Palma da Mão - v2 (Rotas Refatoradas)",
+    "description": "API Saúde na Palma da Mão com rotas modularizadas e autenticação JWT",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "27912179"
+  },
+  "item": [
+    {
+      "name": "Pacientes",
+      "item": [
+        {
+          "name": "Criar Paciente",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer YOUR_JWT_TOKEN_HERE",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"João da Silva\",\n  \"document\": \"12345678910\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://localhost:5000/paciente_criar",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["paciente_criar"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Pacientes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/paciente_listar",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["paciente_listar"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Profissionais",
+      "item": [
+        {
+          "name": "Criar Profissional",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer YOUR_JWT_TOKEN_HERE",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dr. Flávio Silva\",\n  \"profession\": \"médico(a)\",\n  \"credential\": \"123456\",\n  \"professional_document\": \"98765432100\",\n  \"specialty\": \"Clínico Geral\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://localhost:5000/profissional_criar",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["profissional_criar"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Profissionais",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/profissional_listar",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["profissional_listar"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Teleconsultas",
+      "item": [
+        {
+          "name": "Criar Teleconsulta",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer YOUR_JWT_TOKEN_HERE",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patient_name\": \"João Márcio Silva\",\n  \"document\": \"12345678910\",\n  \"patient_report\": \"Paciente com dores no peito\",\n  \"type\": \"agendada\",\n  \"scheduled_date\": \"2026-03-15\",\n  \"scheduled_time\": \"15:00\",\n  \"doctor_name\": \"Dr. Pedro Silva\",\n  \"doctor_credential\": \"123456\",\n  \"professional_document\": \"98765432100\",\n  \"specialty\": \"Clínico Geral\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://localhost:5000/teleatendimento_criar",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["teleatendimento_criar"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Criar Teleconsulta Espontânea",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer YOUR_JWT_TOKEN_HERE",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patient_name\": \"Maria Silva\",\n  \"document\": \"11111111111\",\n  \"type\": \"espontanea\",\n  \"nurse_name\": \"Enfermeira Anastácia Lima\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://localhost:5000/teleatendimento_criar",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["teleatendimento_criar"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Teleconsultas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/teleatendimento_listar",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["teleatendimento_listar"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Buscar Teleconsulta por Hash",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/teleatendimento_buscar/CEF28121",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["teleatendimento_buscar", "CEF28121"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Buscar Teleconsultas por Paciente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/teleatendimento_buscar_por_paciente/12345678910",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["teleatendimento_buscar_por_paciente", "12345678910"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Buscar Teleconsultas por Profissional",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/teleatendimento_buscar_por_profissional/PROFESSIONAL_ID",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["teleatendimento_buscar_por_profissional", "PROFESSIONAL_ID"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Atualizar Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer YOUR_JWT_TOKEN_HERE",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"session_hash\": \"CEF28121\",\n  \"status\": \"completed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://localhost:5000/teleatendimento_atualizar_status",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["teleatendimento_atualizar_status"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Atualizar Tempo de Consulta",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer YOUR_JWT_TOKEN_HERE",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"session_hash\": \"CEF28121\",\n  \"consultation_time\": 30\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://localhost:5000/teleatendimento_atualizar_tempo",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["teleatendimento_atualizar_tempo"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Atualizar Link da Teleconsulta",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer YOUR_JWT_TOKEN_HERE",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"session_hash\": \"CEF28121\",\n  \"meet_link\": \"https://meet.jit.si/NovoLink123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://localhost:5000/teleatendimento_atualizar-_ink",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["teleatendimento_atualizar-_ink"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Avaliar Teleconsulta",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer YOUR_JWT_TOKEN_HERE",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"session_hash\": \"CEF28121\",\n  \"nota\": 5,\n  \"comentario\": \"Excelente atendimento, médico muito atento!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://localhost:5000/teleatendimento_avaliar",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["teleatendimento_avaliar"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Serviços",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/servicos_healthcheck",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["servicos_healthcheck"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Gerar Link Meet",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer YOUR_JWT_TOKEN_HERE",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://localhost:5000/servicos_link-meet",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["servicos_link-meet"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Gerar Token Jitsi",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer YOUR_JWT_TOKEN_HERE",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"room\": \"consultation-room-123\",\n  \"user_email\": \"user@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://localhost:5000/servicos_jitsi_token",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["servicos_jitsi_token"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

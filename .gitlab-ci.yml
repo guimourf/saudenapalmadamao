@@ -1,0 +1,9 @@
+include:
+  - project: 'cogect/devsecops/sonaqube'
+    file: '/.gitlab-ci.yml'
+  - project: 'cogect/devsecops/quay'
+    file: '/.gitlab-ci.yml'
+stages:
+  - scansast  
+  - build  
+  - update-manifest

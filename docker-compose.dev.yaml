@@ -1,0 +1,31 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: saude_api
+    ports:
+      - "8080:8080"
+    environment:
+      - FLASK_ENV=development
+      - SECRET_KEY=dev-secret-key-change-in-production
+      - DEBUG=True
+      - URL_FRONTEND=${URL_FRONTEND}
+    volumes:
+      - .:/app
+      - /app/__pycache__  
+    command: gunicorn --bind 0.0.0.0:8080 --workers 2 --timeout 60 run:app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "${URL_FRONTEND}/api/v1/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - saude_network  
+
+
+networks:
+  saude_network:
+    driver: bridge
