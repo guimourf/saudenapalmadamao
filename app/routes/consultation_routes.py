@@ -1,5 +1,4 @@
 from app.services.session_link import create_session_url, create_telemedicine_hash
-from app.services.meet import create_meet_link_from_hash
 from app.services.auth import require_token
 from app.models.consultation import Consultation
 from app.models.professional import Professional
@@ -274,28 +273,12 @@ class CreateConsultation(Resource):
             rating=0,
             comment='',
             type=consultation_type,
-            status='waiting',
-            triage=triage,
-            time_consultation=0,
-            scheduled_date=scheduled_date,
-            scheduled_time=scheduled_time,
-            meet_link='',
-            session_link=''
         )
         
         # Generate hash based on consultation ID
         session_hash = create_telemedicine_hash(consultation.consultation_id)
         
-        meet_result = create_meet_link_from_hash(session_hash)
-        
-        if not meet_result['success']:
-            return {
-                'message': f'Error generating Meet link: {meet_result["error"]}',
-                'status': 'error'
-            }, 400
-
         # Update consultation with generated links
-        consultation.meet_link = meet_result['meet_link']
         consultation.session_link = create_session_url(session_hash)
         consultation.doctor_link = f"{os.environ['URL_FRONTEND']}/intro-consultorio?session={session_hash}"
         consultation.session_hash = session_hash
@@ -316,14 +299,7 @@ class CreateConsultation(Resource):
             'links': {
                 'patient_link': consultation.session_link,
                 'doctor_link': consultation.doctor_link,
-                'meet_link': meet_result['meet_link'],
                 'session_hash': session_hash
-            },
-            'meet_info': {
-                'meet_link': meet_result['meet_link'],
-                'room_name': meet_result['room_name'],
-                'session_hash': session_hash,
-                'type': consultation_type
             },
             'schedule': {
                 'date': scheduled_date,
@@ -405,7 +381,6 @@ class SearchConsultation(Resource):
                 'patient': convert_to_serializable(patient),
                 'professional': convert_to_serializable(usuario),
                 'doctor_link': teleatendimento.get('doctor_link'),
-                'meet_link': teleatendimento.get('meet_link'),
                 'session_link': teleatendimento.get('session_link'),
                 'session_hash': teleatendimento.get('session_hash')
             }, 200
@@ -598,57 +573,6 @@ class UpdateConsultationTime(Resource):
         except Exception as e:
             return {
                 'message': f'Error updating consultation time: {str(e)}',
-                'status': 'error'
-            }, 500
-
-@ns.route('atualizar-_ink')
-class UpdateConsultationLink(Resource):
-    @require_token
-    def patch(self):
-        """Atualizar link da teleconsulta"""
-        handle = get_handle()
-        data = request.get_json() or {}
-        session_hash = data.get('session_hash')
-        meet_link = data.get('meet_link')
-
-        if not session_hash or not meet_link:
-            return {
-                'message': 'session_hash and meet_link are required for update',
-                'status': 'error'
-            }, 400
-
-        try:
-            req = QueryRequest().set_statement(
-                f"SELECT * FROM consultations WHERE session_hash = '{session_hash}'"
-            )
-            result = handle.query(req)
-            tele_list = result.get_results()
-            if not tele_list:
-                return {
-                    'message': 'Consultation not found',
-                    'status': 'not_found',
-                    'session_hash': session_hash
-                }, 404
-
-            tele = tele_list[0]
-            tele['meet_link'] = meet_link
-            tele['updated_at'] = datetime.now(timezone.utc).isoformat()
-
-            put_req = PutRequest()
-            put_req.set_table_name("consultations")
-            put_req.set_value(tele)
-            handle.put(put_req)
-
-            return {
-                'message': 'Consultation link updated successfully',
-                'status': 'success',
-                'session_hash': session_hash,
-                'meet_link': meet_link
-            }, 200
-
-        except Exception as e:
-            return {
-                'message': f'Error updating consultation link: {str(e)}',
                 'status': 'error'
             }, 500
 

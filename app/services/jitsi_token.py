@@ -9,13 +9,10 @@ class JitsiTokenGenerator:
     def __init__(self):
         self.app_id = os.getenv('JAAS_APP_ID')
         self.kid = os.getenv('JAAS_API_KEY')
-        self.private_key_path = os.getenv('JITSI_SECRET_KEY_PATH', 'jitsi-secret.pk')
+        self.private_key = os.getenv('JITSI_SECRET_KEY')
         
-        try:
-            with open(self.private_key_path, 'r') as f:
-                self.private_key = f.read()
-        except FileNotFoundError:
-            raise Exception(f"Arquivo de chave privada não encontrado: {self.private_key_path}")
+        if not self.private_key:
+            raise Exception("JITSI_SECRET_KEY não encontrada nas variáveis de ambiente")
     
     def generate_token(self, room_name: str, user_name: str, role: str = "participant") -> str:
         is_moderator = role.lower() == "medico"

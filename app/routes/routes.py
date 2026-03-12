@@ -60,7 +60,6 @@ def index():
                     'session_hash': session_hash.upper(),
                     'consultation': consultation,
                     'patient': patient,
-                    'meet_link': consultation.get('meet_link'),
                     'jitsi_room': f"Teleconsultation-{session_hash.upper()}",
                     'message': f'Session {session_hash.upper()} loaded successfully'
                 })
