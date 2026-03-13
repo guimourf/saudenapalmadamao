@@ -18,28 +18,17 @@ class JitsiTokenGenerator:
         self.app_id = os.getenv('JAAS_APP_ID')
         self.kid = os.getenv('JAAS_API_KEY')
         
-        # Obter e processar a chave privada
-        private_key_raw = os.getenv('JITSI_SECRET_KEY', '')
+        # Carregar a chave privada do arquivo .pk
+        key_path = Path(__file__).resolve().parent.parent.parent / 'keys' / 'jitsi-secret.pk'
         
-        if not private_key_raw:
-            logger.error("JITSI_SECRET_KEY não encontrada nas variáveis de ambiente")
-            raise Exception("JITSI_SECRET_KEY não encontrada nas variáveis de ambiente")
+        if not key_path.exists():
+            logger.error(f"Arquivo de chave privada não encontrado em: {key_path}")
+            raise Exception(f"Arquivo de chave privada não encontrado em: {key_path}")
         
-        self.private_key = private_key_raw
+        with open(key_path, 'r') as f:
+            self.private_key = f.read().strip()
         
-        if '\\n' in self.private_key:
-            self.private_key = self.private_key.replace('\\n', '\n')
-        
-        if self.private_key.startswith("'") and self.private_key.endswith("'"):
-            self.private_key = self.private_key[1:-1]
-        
-        if '\\n' in self.private_key:
-            self.private_key = self.private_key.replace('\\n', '\n')
-        
-        # Log para debug
-        logger.info(f"Chave privada carregada: {len(self.private_key)} caracteres")
-        logger.debug(f"Começa com: {self.private_key[:30]}")
-        logger.debug(f"Termina com: {self.private_key[-30:]}")
+        logger.info(f"Chave privada Jitsi carregada do arquivo: {key_path}")
     
     def generate_token(self, room_name: str, user_name: str, role: str = "participant") -> str:
         is_moderator = role.lower() == "medico"
