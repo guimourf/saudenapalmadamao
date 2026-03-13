@@ -5,6 +5,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Limpar CORS_ORIGINS de quebras de linha e espaços
+cors_origins = os.getenv('CORS_ORIGINS', '*').strip()
+
 cors = CORS()
 api = Api(
     version='1.0',
@@ -18,7 +21,7 @@ db_connection = None
 
 def init_extensions(app):
     CORS(app, resources={r"/*": {
-        "origins": os.getenv('CORS_ORIGINS', '*'),
+        "origins": cors_origins,
         "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"]
     }})
