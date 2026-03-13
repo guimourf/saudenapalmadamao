@@ -23,6 +23,18 @@ def init_extensions(app):
     CORS(app, resources={r"/*": {
         "origins": cors_origins,
         "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
+        "allow_headers": ["Content-Type", "Authorization"],
+        "expose_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True,
+        "max_age": 3600
     }})
     api.init_app(app)
+    
+    # Adicionar headers de Access-Control nas responses
+    @app.after_request
+    def after_request(response):
+        response.headers.add('Access-Control-Allow-Origin', cors_origins if cors_origins != '*' else '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
+        response.headers.add('Access-Control-Max-Age', '3600')
+        return response
