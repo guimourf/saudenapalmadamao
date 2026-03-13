@@ -1,18 +1,30 @@
 import jwt
 import os
 import time
+import logging
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+logger = logging.getLogger(__name__)
+
+# Carregar .env do diretório raiz do projeto
+env_path = Path(__file__).resolve().parent.parent.parent / '.env'
+load_dotenv(dotenv_path=env_path)
 
 class JitsiTokenGenerator:
     def __init__(self):
         self.app_id = os.getenv('JAAS_APP_ID')
         self.kid = os.getenv('JAAS_API_KEY')
-        self.private_key = os.getenv('JITSI_SECRET_KEY')
         
-        if not self.private_key:
+        # Obter e processar a chave privada
+        private_key_raw = os.getenv('JITSI_SECRET_KEY', '')
+        
+        if not private_key_raw:
+            logger.error("JITSI_SECRET_KEY não encontrada nas variáveis de ambiente")
             raise Exception("JITSI_SECRET_KEY não encontrada nas variáveis de ambiente")
+        
+        # Converter \n escapados para quebras de linha reais
+        self.private_key = private_key_raw.replace('\\n', '\n')
     
     def generate_token(self, room_name: str, user_name: str, role: str = "participant") -> str:
         is_moderator = role.lower() == "medico"
