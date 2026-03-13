@@ -7,9 +7,11 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Carregar .env do diretório raiz do projeto
+# Tentar carregar .env apenas em desenvolvimento (localhost)
+# Em produção, as variáveis virão do ambiente do servidor
 env_path = Path(__file__).resolve().parent.parent.parent / '.env'
-load_dotenv(dotenv_path=env_path)
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
 
 class JitsiTokenGenerator:
     def __init__(self):
@@ -23,8 +25,21 @@ class JitsiTokenGenerator:
             logger.error("JITSI_SECRET_KEY não encontrada nas variáveis de ambiente")
             raise Exception("JITSI_SECRET_KEY não encontrada nas variáveis de ambiente")
         
-        # Converter \n escapados para quebras de linha reais
-        self.private_key = private_key_raw.replace('\\n', '\n')
+        self.private_key = private_key_raw
+        
+        if '\\n' in self.private_key:
+            self.private_key = self.private_key.replace('\\n', '\n')
+        
+        if self.private_key.startswith("'") and self.private_key.endswith("'"):
+            self.private_key = self.private_key[1:-1]
+        
+        if '\\n' in self.private_key:
+            self.private_key = self.private_key.replace('\\n', '\n')
+        
+        # Log para debug
+        logger.info(f"Chave privada carregada: {len(self.private_key)} caracteres")
+        logger.debug(f"Começa com: {self.private_key[:30]}")
+        logger.debug(f"Termina com: {self.private_key[-30:]}")
     
     def generate_token(self, room_name: str, user_name: str, role: str = "participant") -> str:
         is_moderator = role.lower() == "medico"
@@ -47,8 +62,14 @@ class JitsiTokenGenerator:
             }
         }
         
-        token = jwt.encode(payload, self.private_key, algorithm="RS256", headers={"kid": self.kid})
-        return token
+        try:
+            token = jwt.encode(payload, self.private_key, algorithm="RS256", headers={"kid": self.kid})
+            logger.info(f"Token Jitsi gerado com sucesso para room: {room_name}")
+            return token
+        except Exception as e:
+            logger.error(f"Erro ao gerar token Jitsi: {str(e)}")
+            logger.error(f"Chave privada começa com: {self.private_key[:50]}")
+            raise
 
 
 _jitsi_token_generator = None
