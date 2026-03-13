@@ -5,8 +5,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Limpar CORS_ORIGINS de quebras de linha e espaços
-cors_origins = os.getenv('CORS_ORIGINS', '*').strip()
+# Origens permitidas para CORS
+ALLOWED_ORIGINS = [
+    'https://v0-virtual-clinic-application.vercel.app',
+    'https://saudenapalmadamao.onrender.com',
+    'http://localhost:8080',
+    'http://localhost:5000',
+    'http://localhost:3000'
+]
 
 cors = CORS()
 api = Api(
@@ -21,7 +27,7 @@ db_connection = None
 
 def init_extensions(app):
     CORS(app, resources={r"/*": {
-        "origins": cors_origins,
+        "origins": ALLOWED_ORIGINS,
         "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"],
         "expose_headers": ["Content-Type", "Authorization"],
@@ -33,7 +39,7 @@ def init_extensions(app):
     # Adicionar headers de Access-Control nas responses
     @app.after_request
     def after_request(response):
-        response.headers.add('Access-Control-Allow-Origin', cors_origins if cors_origins != '*' else '*')
+        response.headers.add('Access-Control-Allow-Origin', '*')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
         response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
         response.headers.add('Access-Control-Max-Age', '3600')
