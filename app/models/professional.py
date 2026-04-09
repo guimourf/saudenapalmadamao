@@ -10,7 +10,8 @@ class Professional:
                  credential: str = "",
                  professional_document: str = "",
                  specialty: str = "",
-                 status: str = "active"):
+                 status: str = "active",
+                 availability: str = "available"):
         
         self.professional_id = professional_id or str(uuid.uuid4())
         self.name = name
@@ -19,6 +20,7 @@ class Professional:
         self.professional_document = professional_document
         self.specialty = specialty
         self.status = status
+        self.availability = availability
         self.created_at = datetime.now(timezone.utc).isoformat()
         self.updated_at = datetime.now(timezone.utc).isoformat()
     
@@ -31,6 +33,7 @@ class Professional:
             "professional_document": self.professional_document,
             "specialty": self.specialty,
             "status": self.status,
+            "availability": self.availability,
             "created_at": self.created_at,
             "updated_at": self.updated_at
         }
@@ -44,7 +47,8 @@ class Professional:
             credential=data.get("credential", ""),
             professional_document=data.get("professional_document", ""),
             specialty=data.get("specialty", ""),
-            status=data.get("status", "active")
+            status=data.get("status", "active"),
+            availability=data.get("availability", "available"),
         )
         professional.created_at = data.get("created_at", professional.created_at)
         professional.updated_at = data.get("updated_at", professional.updated_at)

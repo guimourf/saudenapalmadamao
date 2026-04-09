@@ -1,8 +1,6 @@
 from flask import Blueprint, jsonify, request
-from app.services.session_link import create_session_url
 from app.services.nosql import get_handle
-from borneo import QueryRequest
-from app.utils.serializers import convert_to_serializable
+from app.utils.serializers import consultation_for_public_response
 from datetime import datetime, timezone
 
 # Import de todos os namespaces das rotas
@@ -10,6 +8,7 @@ from app.routes.patient_routes import ns as ns_patients
 from app.routes.professional_routes import ns as ns_professionals
 from app.routes.consultation_routes import ns as ns_consultations
 from app.routes.services_routes import ns as ns_services
+import app.routes.queue_routes  
 
 api_bp = Blueprint('api', __name__)
 
@@ -30,12 +29,10 @@ def index():
         try:
             handle = get_handle()
             
-            # Search consultation by session_hash
-            req = QueryRequest().set_statement(
-                f"SELECT * FROM consultations WHERE session_hash = '{session_hash.upper()}'"
+            consultations = handle.find(
+                "consultations",
+                {"session_hash": session_hash.upper()},
             )
-            result = handle.query(req)
-            consultations = result.get_results()
             
             if consultations:
                 consultation = consultations[0]
@@ -45,11 +42,7 @@ def index():
                 patient = None
                 
                 if patient_id:
-                    req_patient = QueryRequest().set_statement(
-                        f"SELECT * FROM patients WHERE patient_id = '{patient_id}'"
-                    )
-                    result_patient = handle.query(req_patient)
-                    patients = result_patient.get_results()
+                    patients = handle.find("patients", {"patient_id": patient_id})
                     
                     if patients:
                         patient = patients[0]
@@ -58,7 +51,7 @@ def index():
                 response_data.update({
                     'session_found': True,
                     'session_hash': session_hash.upper(),
-                    'consultation': consultation,
+                    'consultation': consultation_for_public_response(consultation),
                     'patient': patient,
                     'jitsi_room': f"Teleconsultation-{session_hash.upper()}",
                     'message': f'Session {session_hash.upper()} loaded successfully'
@@ -94,12 +87,10 @@ def intro_consultorio():
         try:
             handle = get_handle()
             
-            # Busca teleatendimento pelo session_hash
-            req = QueryRequest().set_statement(
-                f"SELECT * FROM consultations WHERE session_hash = '{session_hash.upper()}'"
+            teleatendimentos = handle.find(
+                "consultations",
+                {"session_hash": session_hash.upper()},
             )
-            result = handle.query(req)
-            teleatendimentos = result.get_results()
             
             if teleatendimentos:
                 teleatendimento = teleatendimentos[0]
@@ -109,11 +100,9 @@ def intro_consultorio():
                 professional = None
                 
                 if usuario_id:
-                    req_professional = QueryRequest().set_statement(
-                        f"SELECT * FROM professionals WHERE professional_id = '{usuario_id}'"
+                    professionals = handle.find(
+                        "professionals", {"professional_id": usuario_id}
                     )
-                    result_professional = handle.query(req_professional)
-                    professionals = result_professional.get_results()
                     
                     if professionals:
                         professional = professionals[0]
@@ -122,9 +111,8 @@ def intro_consultorio():
                 response_data.update({
                     'session_found': True,
                     'session_hash': session_hash.upper(),
-                    'teleatendimento': teleatendimento,
+                    'teleatendimento': consultation_for_public_response(teleatendimento),
                     'professional': professional,
-                    'meet_link': teleatendimento.get('meet_link'),
                     'jitsi_room': f"Teleconsulta-{session_hash.upper()}",
                     'message': f'Sessão {session_hash.upper()} carregada com sucesso'
                 })

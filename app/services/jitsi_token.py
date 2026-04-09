@@ -16,18 +16,15 @@ class JitsiTokenGenerator:
     def __init__(self):
         self.iss = os.getenv('JITSI_JWT_ISSUER')
         self.aud = os.getenv('JITSI_JWT_AUDIENCE')
-        self.sub = os.getenv('JITSI_JWT_SUB')
+        self.sub = 'meet.jitsi'
         self.secret = os.getenv('JITSI_JWT_SECRET')
         self.public_url = (os.getenv('JITSI_PUBLIC_URL') or '').rstrip('/')
-        self.ttl = int(os.getenv('JWT_TTL_SECONDS', '86400'))
-
-        print(f"JitsiTokenGenerator: {self.secret}")
-
-        
+        self.ttl = 86400
 
         if not all([self.iss, self.aud, self.sub, self.secret]):
-            raise Exception('JITSI_JWT_ISSUER, JITSI_JWT_AUDIENCE, JITSI_JWT_SUB e JITSI_JWT_SECRET são obrigatórios')
-
+                raise Exception('JITSI_JWT_ISSUER, JITSI_JWT_AUDIENCE, JITSI_JWT_SUB e JITSI_JWT_SECRET são obrigatórios')
+        
+        
     def generate_token(
         self,
         room_name: str,

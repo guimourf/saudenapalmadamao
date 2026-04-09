@@ -5,13 +5,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Origens permitidas para CORS
 ALLOWED_ORIGINS = [
     'https://v0-virtual-clinic-application.vercel.app',
     'https://saudenapalmadamao.onrender.com',
     'http://localhost:8080',
     'http://localhost:5000',
-    'http://localhost:3000'
+    'http://localhost:3000',
+    'https://dev-saudenapalmadamao.fortaleza.ce.gov.br'
 ]
 
 cors = CORS()
@@ -36,7 +36,6 @@ def init_extensions(app):
     }})
     api.init_app(app)
     
-    # Adicionar headers de Access-Control nas responses
     @app.after_request
     def after_request(response):
         response.headers.add('Access-Control-Allow-Origin', '*')

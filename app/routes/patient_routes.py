@@ -1,7 +1,6 @@
 from app.models.patient import Patient
 from app.utils.serializers import convert_to_serializable
 from app.services.auth import require_token
-from borneo import PutRequest, QueryRequest
 from flask import request
 from flask_restx import Resource, Namespace
 from app.services.nosql import get_handle
@@ -9,7 +8,6 @@ from app.extensions import api
 import re
 
 def clean_document(document):
-    """Remove caracteres não numéricos do documento"""
     if not document:
         return ""
     return re.sub(r'\D', '', document)
@@ -25,7 +23,7 @@ class CreatePatient(Resource):
         handle = get_handle()
 
         data = request.get_json() or {}
-        name = data.get('name')
+        name = (data.get('name') or '').strip()
         document = clean_document(data.get('document', ''))
         
         if not name or not document:
@@ -34,13 +32,8 @@ class CreatePatient(Resource):
                 'status': 'error'
             }, 400
 
-        # Check if patient with this document already exists
         try:
-            req_search = QueryRequest().set_statement(
-                f"SELECT * FROM patients WHERE document = '{document}'"
-            )
-            result_search = handle.query(req_search)
-            existing_patients = result_search.get_results()
+            existing_patients = handle.find("patients", {"document": document})
             
             if existing_patients:
                 return {
@@ -60,11 +53,7 @@ class CreatePatient(Resource):
         )
         patient_data = patient.to_dict()
 
-        req = PutRequest()
-        req.set_table_name("patients")
-        req.set_value(patient_data)
-
-        handle.put(req)
+        handle.save("patients", patient_data)
 
         return {
             'message': 'Patient created successfully',
@@ -78,13 +67,7 @@ class ListPatients(Resource):
         """Listar todos os pacientes"""
         handle = get_handle()
 
-        req = QueryRequest().set_statement(
-            "SELECT * FROM patients"
-        )
-
-        result = handle.query(req)
-
-        patients = result.get_results()
+        patients = handle.find("patients")
 
         return {
             'message': 'Patients listed successfully',

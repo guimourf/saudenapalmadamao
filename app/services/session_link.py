@@ -38,16 +38,12 @@ class TelemedicineHashGenerator:
         try:
             # Importa aqui para evitar circular imports
             from app.services.nosql import get_handle
-            from borneo import QueryRequest
-            
+
             handle = get_handle()
-            
-            # Busca o consultation pelo session_hash
-            req = QueryRequest().set_statement(
-                f"SELECT * FROM consultations WHERE session_hash = '{short_hash.upper()}'"
+            consultations = handle.find(
+                "consultations",
+                {"session_hash": short_hash.upper()},
             )
-            result = handle.query(req)
-            consultations = result.get_results()
             
             if not consultations:
                 return {

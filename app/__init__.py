@@ -1,4 +1,5 @@
 from flask import Flask
+from flask_cors import CORS
 import os
 import sys
 import logging
@@ -16,6 +17,15 @@ def create_app():
     # Configurações básicas
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key-change-in-production')
     app.config['DEBUG'] = os.getenv('DEBUG', 'True').lower() == 'true'
+
+    logger.info(f"DEBUG: {app.config['DEBUG']}")
+    logger.info(f"SECRET_KEY: {app.config['SECRET_KEY']}")
+    logger.info(f"JITSI_PUBLIC_URL: {os.getenv('JITSI_PUBLIC_URL')}")
+    logger.info(f"JITSI_JWT_ISSUER: {os.getenv('JITSI_JWT_ISSUER')}")
+    logger.info(f"JITSI_JWT_AUDIENCE: {os.getenv('JITSI_JWT_AUDIENCE')}")
+    logger.info(f"JITSI_JWT_SUB: {os.getenv('JITSI_JWT_SUB')}")
+    logger.info(f"JITSI_JWT_SECRET: {os.getenv('JITSI_JWT_SECRET')}")
+    logger.info(f"JITSI_TTL: {os.getenv('JITSI_TTL')}")
     
     init_extensions(app)
     
@@ -23,11 +33,7 @@ def create_app():
     
     with app.app_context():
         try:
-            # Escolhe qual init_db usar baseado na variável de ambiente
-            if os.getenv('MONGO_URI'):
-                from init_db_new import init_database
-            else:
-                from init_db import init_database
+            from init_db import init_database
             init_database()
         except Exception as e:
             logger.warning(f" Não foi possível inicializar o banco: {e}")

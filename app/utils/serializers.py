@@ -7,6 +7,16 @@ except ImportError:
     ObjectId = None
 
 
+def consultation_for_public_response(data):
+    """Remove links de chamada do payload de consulta."""
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        return convert_to_serializable(data)
+    public = {k: v for k, v in data.items() if k not in ("meet_link", "host_url")}
+    return convert_to_serializable(public)
+
+
 def convert_to_serializable(obj):
     """Converte objetos não-serializáveis para tipos JSON serializáveis"""
     if isinstance(obj, Decimal):

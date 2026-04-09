@@ -15,10 +15,13 @@ class Consultation:
                  doctor_credential: str = "",
                  professional_document: str = "",
                  specialty: str = "",
-                 meet_link: str = "",
                  session_link: str = "",
                  doctor_link: str = "",
+                 meet_link: str = "",
+                 host_url: str = "",
                  session_hash: str = "",
+                 queue_name: str = "",
+                 queue_status: str = "",
                  rating: int = 0,
                  comment: str = "",
                  type: str = "",
@@ -41,10 +44,13 @@ class Consultation:
         self.doctor_credential = doctor_credential
         self.professional_document = professional_document
         self.specialty = specialty
-        self.meet_link = meet_link
         self.session_link = session_link
         self.doctor_link = doctor_link
+        self.meet_link = meet_link
+        self.host_url = host_url
         self.session_hash = session_hash
+        self.queue_name = queue_name
+        self.queue_status = queue_status
         self.rating = rating
         self.comment = comment
         self.type = type
@@ -77,10 +83,13 @@ class Consultation:
             "doctor_credential": self.doctor_credential,
             "professional_document": self.professional_document,
             "specialty": self.specialty,
-            "meet_link": self.meet_link,
             "session_link": self.session_link,
             "doctor_link": self.doctor_link,
+            "meet_link": self.meet_link,
+            "host_url": self.host_url,
             "session_hash": self.session_hash,
+            "queue_name": self.queue_name,
+            "queue_status": self.queue_status,
             "rating": self.rating,
             "comment": self.comment,
             "feedback": self.comment,
@@ -112,8 +121,13 @@ class Consultation:
             doctor_credential=data.get("doctor_credential", ""),
             professional_document=data.get("professional_document", ""),
             specialty=data.get("specialty", ""),
-            meet_link=data.get("meet_link", ""),
             session_link=data.get("session_link",""),
+            doctor_link=data.get("doctor_link", ""),
+            meet_link=data.get("meet_link", ""),
+            host_url=data.get("host_url", ""),
+            session_hash=data.get("session_hash", ""),
+            queue_name=data.get("queue_name", ""),
+            queue_status=data.get("queue_status", ""),
             type=data.get("type", ""),
             consultation_id=data.get("consultation_id") or data.get("id"),
             status=data.get("status", "waiting"),

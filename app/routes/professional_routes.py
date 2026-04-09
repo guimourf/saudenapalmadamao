@@ -1,15 +1,29 @@
 from app.models.professional import Professional
 from app.utils.serializers import convert_to_serializable
 from app.services.auth import require_token
-from borneo import PutRequest, QueryRequest
 from flask import request
 from flask_restx import Resource, Namespace
 from app.services.nosql import get_handle
+from app.services.queue_assignment import (
+    coerce_professional_cadastro_status,
+    drain_waiting_with_available_nurses,
+    list_nurses_marked_available,
+)
 from app.extensions import api
+from datetime import datetime, timezone
+
 from app.constants import (
     PROFESSION_CHOICES,
     PROFESSION_LABELS,
+    NURSE_PROFESSION,
+    PHYSICIAN_PROFESSION,
+    PROFESSIONAL_AVAILABILITY_CHOICES,
+    PROFESSIONAL_AVAILABILITY_LABELS,
+    PROFESSIONAL_STATUS_CHOICES,
+    PROFESSIONAL_STATUS_LABELS,
+    canonical_professional_availability,
     is_valid_profession,
+    is_valid_professional_status,
 )
 import re
 
@@ -19,6 +33,73 @@ def clean_document(document):
         return ""
     return re.sub(r'\D', '', document)
 
+
+def _professionals_by_document(handle, raw_document):
+    """
+    Profissionais cujo professional_document bate com raw_document após limpeza.
+    Cobre string numérica no Mongo, número (legado) e formatação só com máscara no campo.
+    """
+    doc = clean_document(raw_document)
+    if not doc:
+        return [], doc
+    or_clauses = [{"professional_document": doc}]
+    if doc.isdigit():
+        try:
+            or_clauses.append({"professional_document": int(doc)})
+        except ValueError:
+            pass
+    rows = handle.find("professionals", {"$or": or_clauses})
+    if rows:
+        return rows, doc
+    matches = [
+        p
+        for p in handle.find("professionals")
+        if clean_document(str(p.get("professional_document") or "")) == doc
+    ]
+    return matches, doc
+
+
+def _professional_by_document(handle, raw_document):
+    doc = clean_document(raw_document)
+    if not doc:
+        return None, doc
+    rows, _ = _professionals_by_document(handle, raw_document)
+    if not rows:
+        return None, doc
+    return rows[0], doc
+
+
+def _normalize_professional_availability(handle, prof):
+    """Garante availability nos 4 estados canônicos (inglês); normaliza sinônimos em PT."""
+    updated = False
+    raw = prof.get("availability")
+    canon = canonical_professional_availability(raw) if raw else None
+
+    if canon:
+        if prof.get("availability") != canon:
+            prof["availability"] = canon
+            updated = True
+    else:
+        current_status = (prof.get("status") or "").strip().lower()
+        if current_status in PROFESSIONAL_AVAILABILITY_CHOICES:
+            prof["availability"] = current_status
+            prof["status"] = "active"
+            updated = True
+        else:
+            prof["availability"] = "available"
+            updated = True
+
+    before_coerce_status = prof.get("status")
+    coerce_professional_cadastro_status(prof)
+    if prof.get("status") != before_coerce_status:
+        updated = True
+
+    if updated:
+        prof["updated_at"] = datetime.now(timezone.utc).isoformat()
+        handle.save("professionals", prof)
+    return prof, updated
+
+
 ns = Namespace('profissional', description='Endpoints de Profissionais')
 api.add_namespace(ns, path='/profissional_')
 
@@ -26,7 +107,6 @@ api.add_namespace(ns, path='/profissional_')
 class CreateProfessional(Resource):
     @require_token
     def post(self):
-        """Criar um novo profissional"""
         handle = get_handle()
 
         data = request.get_json() or {}
@@ -59,33 +139,42 @@ class CreateProfessional(Resource):
                 'valid_professions': PROFESSION_CHOICES,
                 'labels': PROFESSION_LABELS
             }, 400
-        
-        if not credential:
-            return {
-                'message': 'credential is required',
-                'status': 'error'
-            }, 400
-        
+
+        if profession == PHYSICIAN_PROFESSION:
+            if not credential:
+                return {
+                    'message': 'credential is required for médico(a)',
+                    'status': 'error',
+                }, 400
+        else:
+            credential = credential or ""
+
         if not professional_document:
             return {
                 'message': 'professional_document is required',
                 'status': 'error'
             }, 400
 
-        # Check if professional with this document already exists
         try:
-            req_search = QueryRequest().set_statement(
-                f"SELECT * FROM professionals WHERE professional_document = '{professional_document}'"
+            existing_professionals, _ = _professionals_by_document(
+                handle, professional_document
             )
-            result_search = handle.query(req_search)
-            existing_professionals = result_search.get_results()
-            
             if existing_professionals:
                 return {
                     'message': 'Professional with this document already exists',
                     'status': 'error',
                     'existing_professional': convert_to_serializable(existing_professionals[0])
                 }, 409
+            if credential:
+                cred_rows = handle.find("professionals", {"credential": credential})
+                for ex in cred_rows:
+                    ex_doc = clean_document(ex.get("professional_document", "") or "")
+                    if ex_doc != professional_document:
+                        return {
+                            'message': 'credential already registered to another professional_document',
+                            'status': 'error',
+                            'existing_professional_document': ex_doc or None,
+                        }, 409
         except Exception as e:
             return {
                 'message': f'Error checking for existing professional: {str(e)}',
@@ -101,11 +190,7 @@ class CreateProfessional(Resource):
         )
         professional_data = professional.to_dict()
 
-        req = PutRequest()
-        req.set_table_name("professionals")
-        req.set_value(professional_data)
-
-        handle.put(req)
+        handle.save("professionals", professional_data)
 
         return {
             'message': 'Professional created successfully',
@@ -116,18 +201,332 @@ class CreateProfessional(Resource):
 class ListProfessionals(Resource):
     @require_token
     def get(self):
-        """Listar todos os profissionais"""
         handle = get_handle()
 
-        req = QueryRequest().set_statement(
-            "SELECT * FROM professionals"
-        )
-
-        result = handle.query(req)
-
-        professionals = result.get_results()
+        professionals = handle.find("professionals")
+        normalized = []
+        for p in professionals:
+            p, _ = _normalize_professional_availability(handle, p)
+            normalized.append(p)
 
         return {
             'message': 'Professionals listed successfully',
-            'professionals': convert_to_serializable(professionals)
+            'professionals': convert_to_serializable(normalized)
         }, 200
+
+
+@ns.route('filtrar_profissao/<string:profession>')
+class ListProfessionalsByProfession(Resource):
+    """Lista todos os profissionais com a profissão informada. Um profissional específico: GET buscar/<professional_document>."""
+
+    @require_token
+    def get(self, profession):
+        handle = get_handle()
+        profession = (profession or "").strip().lower()
+        if not profession:
+            return {
+                'message': 'profession is required',
+                'status': 'error',
+            }, 400
+        professionals = handle.find("professionals")
+        by_id: dict = {}
+        no_id: list = []
+        for p in professionals:
+            if (p.get("profession") or "").strip().lower() != profession:
+                continue
+            p, _ = _normalize_professional_availability(handle, p)
+            pid = p.get("professional_id") or ""
+            if not pid:
+                no_id.append(p)
+                continue
+            prev = by_id.get(pid)
+            if prev is None or (p.get("updated_at") or "") > (prev.get("updated_at") or ""):
+                by_id[pid] = p
+        filtered = list(by_id.values()) + no_id
+        return {
+            'message': 'Professionals listed by profession successfully',
+            'status': 'success',
+            'profession': profession,
+            'total': len(filtered),
+            'professionals': convert_to_serializable(filtered),
+        }, 200
+
+
+@ns.route('migrar_availability')
+class MigrateAvailability(Resource):
+    @require_token
+    def patch(self):
+        handle = get_handle()
+        professionals = handle.find("professionals")
+        changed = 0
+        for p in professionals:
+            _, updated = _normalize_professional_availability(handle, p)
+            if updated:
+                changed += 1
+        return {
+            'message': 'Availability migration executed',
+            'status': 'success',
+            'updated_count': changed,
+            'total': len(professionals),
+        }, 200
+
+
+@ns.route('buscar/<string:professional_document>')
+class GetProfessionalByDocument(Resource):
+    @require_token
+    def get(self, professional_document):
+        handle = get_handle()
+        try:
+            prof, doc = _professional_by_document(handle, professional_document)
+            if not doc:
+                return {
+                    'message': 'professional_document inválido ou vazio',
+                    'status': 'error',
+                }, 400
+            if not prof:
+                return {
+                    'message': 'Professional not found',
+                    'status': 'not_found',
+                    'professional_document': doc,
+                }, 404
+            prof, _ = _normalize_professional_availability(handle, prof)
+            return {
+                'message': 'Professional retrieved successfully',
+                'status': 'success',
+                'professional_document': doc,
+                'professional': convert_to_serializable(prof),
+            }, 200
+        except Exception as e:
+            return {
+                'message': f'Error fetching professional: {str(e)}',
+                'status': 'error',
+            }, 500
+
+
+@ns.route('atualizar/<string:professional_document>')
+class UpdateProfessionalByDocument(Resource):
+    @require_token
+    def patch(self, professional_document):
+        handle = get_handle()
+        data = request.get_json() or {}
+
+        name = data.get('name')
+        profession = data.get('profession')
+        credential = data.get('credential')
+        specialty = data.get('specialty')
+
+        has_any = any(
+            x is not None and (not isinstance(x, str) or x.strip() != '')
+            for x in (name, profession, credential, specialty)
+        )
+        if not has_any:
+            return {
+                'message': 'Informe ao menos um campo: name, profession, credential, specialty',
+                'status': 'error',
+            }, 400
+
+        try:
+            prof, doc = _professional_by_document(handle, professional_document)
+            if not doc:
+                return {
+                    'message': 'professional_document inválido ou vazio',
+                    'status': 'error',
+                }, 400
+            if not prof:
+                return {
+                    'message': 'Professional not found',
+                    'status': 'not_found',
+                    'professional_document': doc,
+                }, 404
+            prof, _ = _normalize_professional_availability(handle, prof)
+
+            if name is not None:
+                name = name.strip()
+                if not name:
+                    return {'message': 'name não pode ser vazio', 'status': 'error'}, 400
+                prof['name'] = name
+
+            if profession is not None:
+                profession = profession.strip()
+                if not profession:
+                    return {'message': 'profession não pode ser vazio', 'status': 'error'}, 400
+                if not is_valid_profession(profession):
+                    return {
+                        'message': f'Invalid profession. Accepted: {", ".join(PROFESSION_CHOICES)}',
+                        'status': 'error',
+                        'valid_professions': PROFESSION_CHOICES,
+                        'labels': PROFESSION_LABELS,
+                    }, 400
+                prof['profession'] = profession
+
+            if credential is not None:
+                credential = clean_document(credential)
+                eff_prof = profession if profession is not None else (prof.get('profession') or '')
+                if not credential and (eff_prof or '').strip() == PHYSICIAN_PROFESSION:
+                    return {
+                        'message': 'credential inválido ou vazio para médico(a)',
+                        'status': 'error',
+                    }, 400
+                prof['credential'] = credential
+
+            if specialty is not None:
+                prof['specialty'] = specialty.strip()
+
+            prof['updated_at'] = datetime.now(timezone.utc).isoformat()
+
+            handle.save('professionals', prof)
+
+            return {
+                'message': 'Professional updated successfully',
+                'status': 'success',
+                'professional_document': doc,
+                'professional': convert_to_serializable(prof),
+            }, 200
+        except Exception as e:
+            return {
+                'message': f'Error updating professional: {str(e)}',
+                'status': 'error',
+            }, 500
+
+
+@ns.route('disponiveis')
+class ListAvailableProfessionals(Resource):
+    @require_token
+    def get(self):
+        handle = get_handle()
+        try:
+            filtered = list_nurses_marked_available(handle)
+            return {
+                'message': 'Available nurses listed successfully',
+                'status': 'success',
+                'total': len(filtered),
+                'professionals': convert_to_serializable(filtered),
+            }, 200
+        except Exception as e:
+            return {
+                'message': f'Error listing available professionals: {str(e)}',
+                'status': 'error',
+            }, 500
+
+
+@ns.route('disponibilidade/<string:professional_document>')
+class UpdateProfessionalAvailability(Resource):
+    @require_token
+    def patch(self, professional_document):
+        handle = get_handle()
+        data = request.get_json() or {}
+        availability = canonical_professional_availability(data.get("availability"))
+
+        if not availability:
+            return {
+                'message': 'availability inválido ou ausente',
+                'status': 'error',
+                'valid_availability': PROFESSIONAL_AVAILABILITY_CHOICES,
+                'labels': PROFESSIONAL_AVAILABILITY_LABELS,
+            }, 400
+
+        try:
+            prof, doc = _professional_by_document(handle, professional_document)
+            if not doc:
+                return {
+                    'message': 'professional_document inválido ou vazio',
+                    'status': 'error',
+                }, 400
+            if not prof:
+                return {
+                    'message': 'Professional not found',
+                    'status': 'not_found',
+                    'professional_document': doc,
+                }, 404
+            prof, _ = _normalize_professional_availability(handle, prof)
+
+            prof['availability'] = availability
+            prof['updated_at'] = datetime.now(timezone.utc).isoformat()
+
+            handle.save('professionals', prof)
+
+            auto_assignment = None
+            auto_assignments = []
+            if (
+                availability == "available"
+                and (prof.get("profession") or "").strip() == NURSE_PROFESSION
+            ):
+                drain = drain_waiting_with_available_nurses(handle)
+                auto_assignments = drain.get("assignments") or []
+                pid = prof.get("professional_id")
+                auto_assignment = next(
+                    (a for a in auto_assignments if a.get("nurse_id") == pid),
+                    None,
+                )
+
+            return {
+                'message': 'Professional availability updated successfully',
+                'status': 'success',
+                'professional_document': doc,
+                'availability': availability,
+                'professional': convert_to_serializable(prof),
+                'auto_assignment': convert_to_serializable(auto_assignment),
+                'auto_assignments': convert_to_serializable(auto_assignments),
+            }, 200
+        except Exception as e:
+            return {
+                'message': f'Error updating professional availability: {str(e)}',
+                'status': 'error',
+            }, 500
+
+
+@ns.route('status/<string:professional_document>')
+class UpdateProfessionalStatus(Resource):
+    @require_token
+    def patch(self, professional_document):
+        handle = get_handle()
+        data = request.get_json() or {}
+        status = (data.get('status') or '').strip().lower()
+
+        if not status:
+            return {
+                'message': 'status is required',
+                'status': 'error',
+                'valid_status': PROFESSIONAL_STATUS_CHOICES,
+                'labels': PROFESSIONAL_STATUS_LABELS,
+            }, 400
+
+        if not is_valid_professional_status(status):
+            return {
+                'message': f'Invalid status. Accepted: {", ".join(PROFESSIONAL_STATUS_CHOICES)}',
+                'status': 'error',
+                'valid_status': PROFESSIONAL_STATUS_CHOICES,
+                'labels': PROFESSIONAL_STATUS_LABELS,
+            }, 400
+
+        try:
+            prof, doc = _professional_by_document(handle, professional_document)
+            if not doc:
+                return {
+                    'message': 'professional_document inválido ou vazio',
+                    'status': 'error',
+                }, 400
+            if not prof:
+                return {
+                    'message': 'Professional not found',
+                    'status': 'not_found',
+                    'professional_document': doc,
+                }, 404
+
+            prof['status'] = status
+            prof['updated_at'] = datetime.now(timezone.utc).isoformat()
+
+            handle.save('professionals', prof)
+
+            return {
+                'message': 'Professional status updated successfully',
+                'status': 'success',
+                'professional_document': doc,
+                'new_status': status,
+                'professional': convert_to_serializable(prof),
+            }, 200
+        except Exception as e:
+            return {
+                'message': f'Error updating professional status: {str(e)}',
+                'status': 'error',
+            }, 500

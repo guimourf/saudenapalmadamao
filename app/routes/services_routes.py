@@ -5,8 +5,6 @@ from app.utils.serializers import convert_to_serializable
 from flask import jsonify, request
 from flask_restx import Resource, Namespace
 from app.extensions import api
-from app.services.nosql import get_handle
-from borneo import QueryRequest
 from datetime import datetime
 import os
 
@@ -65,7 +63,10 @@ class GenerateJitsiToken(Resource):
         data = request.get_json() or {}
         room_name = data.get('room_name') or data.get('roomName')
         user_name = data.get('user_name') or data.get('userName')
-        role = data.get('role', 'participant')  # 'medico' ou 'patiente'
+        role = data.get('role', 'participant')
+        user_id = data.get('user_id') or data.get('userId')
+        email = data.get('email')
+        affiliation = data.get('affiliation')
         
         if not room_name or not user_name:
             return {
@@ -75,16 +76,24 @@ class GenerateJitsiToken(Resource):
         
         try:
             from app.services.jitsi_token import generate_jitsi_token
-            token = generate_jitsi_token(room_name, user_name, role)
-            
-            return {
+            out = generate_jitsi_token(
+                room_name, user_name, role, user_id, email, affiliation
+            )
+            body = {
                 'message': 'Token Jitsi gerado com sucesso',
                 'status': 'success',
-                'token': token,
+                'token': out['token'],
                 'room_name': room_name,
                 'user_name': user_name,
-                'role': role
-            }, 200
+                'role': role,
+                'jwt_payload': out['jwt_payload'],
+                'expires_at_epoch': out['expires_at_epoch'],
+                'expires_at': out['expires_at'],
+            }
+            if 'host_url' in out:
+                body['host_url'] = out['host_url']
+                body['guest_url'] = out['guest_url']
+            return body, 200
             
         except Exception as e:
             return {
