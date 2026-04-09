@@ -9,6 +9,12 @@ class TelemedicineHashGenerator:
     def __init__(self):
         self.base_url = os.getenv('URL_FRONTEND', 'http://localhost:5000')
         print(f"Base URL configurado: {self.base_url}")
+
+    def _normalized_base_url(self) -> str:
+        """
+        Remove barras no final para evitar URLs com `//`.
+        """
+        return self.base_url.rstrip('/')
     
     def generate_hash_from_telemedicine_id(self, consultation_id: str) -> str:
         """
@@ -73,7 +79,13 @@ class TelemedicineHashGenerator:
         """
         Cria URL no formato localhost:5000/?session=<hash>
         """
-        return f"{self.base_url}/?session={short_hash}"
+        return f"{self._normalized_base_url()}/?session={short_hash}"
+
+    def create_doctor_url(self, short_hash: str) -> str:
+        """
+        Cria URL para acesso do profissional.
+        """
+        return f"{self._normalized_base_url()}/intro-consultorio?session={short_hash}"
 
 
 # Instância global
@@ -99,3 +111,10 @@ def create_session_url(short_hash: str) -> str:
     Função auxiliar para criar URL de sessão
     """
     return telemedicine_hash_generator.create_session_url(short_hash)
+
+
+def create_doctor_url(short_hash: str) -> str:
+    """
+    Função auxiliar para criar URL de entrada do profissional.
+    """
+    return telemedicine_hash_generator.create_doctor_url(short_hash)

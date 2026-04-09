@@ -1,4 +1,8 @@
-from app.services.session_link import create_session_url, create_telemedicine_hash
+from app.services.session_link import (
+    create_session_url,
+    create_doctor_url,
+    create_telemedicine_hash,
+)
 from app.services.meet import generate_jitsi_link
 from app.services.jitsi_token import generate_jitsi_token
 from app.services.auth import require_token
@@ -392,9 +396,7 @@ class CreateConsultation(Resource):
 
         consultation.session_link = create_session_url(session_hash)
         consultation.doctor_link = (
-            f"{os.environ['URL_FRONTEND']}intro-consultorio?session={session_hash}"
-            if consultation_type != "espontanea"
-            else ""
+            create_doctor_url(session_hash) if consultation_type != "espontanea" else ""
         )
         consultation.session_hash = session_hash
         consultation.meet_link = meet_link
