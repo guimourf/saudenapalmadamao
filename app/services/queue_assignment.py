@@ -8,6 +8,7 @@ from app.constants import (
     NURSE_PROFESSION,
     PROFESSIONAL_AVAILABILITY_CHOICES,
     PROFESSIONAL_STATUS_CHOICES,
+    canonical_profession,
     canonical_professional_availability,
 )
 
@@ -121,7 +122,7 @@ def set_professional_availability_by_id(
 
 
 def _nurse_eligible_for_auto_assign(p: Dict[str, Any]) -> bool:
-    if (p.get("profession") or "").strip().lower() != NURSE_PROFESSION.strip().lower():
+    if canonical_profession(p.get("profession")) != NURSE_PROFESSION:
         return False
     if (p.get("status") or "").strip().lower() != "active":
         return False
@@ -133,7 +134,7 @@ def list_nurses_marked_available(handle) -> List[Dict[str, Any]]:
     """Enfermeiras com cadastro ativo e availability `available` (não busy / unavailable / on_break)."""
     buckets: Dict[str, List[Dict[str, Any]]] = {}
     for raw in handle.find("professionals"):
-        if (raw.get("profession") or "").strip().lower() != NURSE_PROFESSION.strip().lower():
+        if canonical_profession(raw.get("profession")) != NURSE_PROFESSION:
             continue
         p = _normalize_professional_availability_no_persist(dict(raw))
         pid = p.get("professional_id") or ""

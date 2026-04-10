@@ -25,10 +25,13 @@ from app.services.default_queue import resolve_operation_queue
 from app.extensions import api
 from app.constants import (
     ESPONTANEA_IN_PROGRESS_STATUSES,
+    NURSE_PROFESSION,
+    PHYSICIAN_PROFESSION,
     TELEATENDIMENTO_STATUS_CHOICES,
     TELEATENDIMENTO_TYPE_CHOICES,
     TELEATENDIMENTO_STATUS_LABELS,
     TELEATENDIMENTO_TYPE_LABELS,
+    canonical_profession,
     is_valid_status,
     is_valid_type,
 )
@@ -262,7 +265,7 @@ class CreateConsultation(Resource):
                 medicos = [
                     p
                     for p in by_doc
-                    if (p.get("profession") or "").strip() == "médico(a)"
+                    if canonical_profession(p.get("profession")) == PHYSICIAN_PROFESSION
                 ]
                 medico = medicos[0] if medicos else None
 
@@ -296,7 +299,7 @@ class CreateConsultation(Resource):
                     else:
                         doctor_new = Professional(
                             name=doctor_name,
-                            profession="médico(a)",
+                            profession=PHYSICIAN_PROFESSION,
                             credential=doctor_credential,
                             professional_document=professional_document,
                             specialty=specialty,
@@ -317,7 +320,7 @@ class CreateConsultation(Resource):
                 enfermeiros = [
                     p
                     for p in by_doc
-                    if (p.get("profession") or "").strip() == "enfermeiro(a)"
+                    if canonical_profession(p.get("profession")) == NURSE_PROFESSION
                 ]
                 if enfermeiros:
                     nurse_data = enfermeiros[0]
@@ -330,7 +333,7 @@ class CreateConsultation(Resource):
                         }, 409
                     nurse_new = Professional(
                         name=nurse_name,
-                        profession="enfermeiro(a)",
+                        profession=NURSE_PROFESSION,
                         credential=professional_document,
                         professional_document=professional_document,
                         specialty="",
@@ -748,7 +751,7 @@ class InsertNurseIntoConsultation(Resource):
             nurse = next(
                 (
                     p for p in professionals
-                    if (p.get("profession") or "").strip() == "enfermeiro(a)"
+                    if canonical_profession(p.get("profession")) == NURSE_PROFESSION
                 ),
                 None,
             )

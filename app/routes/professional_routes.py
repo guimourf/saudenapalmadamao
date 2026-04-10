@@ -21,6 +21,7 @@ from app.constants import (
     PROFESSIONAL_AVAILABILITY_LABELS,
     PROFESSIONAL_STATUS_CHOICES,
     PROFESSIONAL_STATUS_LABELS,
+    canonical_profession,
     canonical_professional_availability,
     is_valid_profession,
     is_valid_professional_status,
@@ -83,7 +84,12 @@ def _dedupe_professionals_by_id(professionals):
     return list(by_id.values()) + no_id
 
 def _filters_from_request_args(args):
-    """Cada ?nome=valor usa o mesmo nome de campo do documento. Ignora chaves que começam com _."""
+    """
+    Cada ?nome=valor vira filtro no documento (AND entre todos).
+    Nome do parâmetro vira minúsculo (availability e Availability são o mesmo campo).
+    Alias: profissao → profession.
+    """
+    aliases = {"profissao": "profession"}
     out = {}
     for key in args:
         if key.startswith("_"):
@@ -91,24 +97,95 @@ def _filters_from_request_args(args):
         raw = args.get(key)
         if raw is None or str(raw).strip() == "":
             continue
-        field = key
-        if key.lower() == "profissao":
-            field = "profession"
+        field = aliases.get(key.lower(), key.lower())
         out[field] = str(raw).strip()
     return out
 
 
+_INT_FILTER_FIELDS = frozenset({"position", "priority"})
+
+
 def _profession_matches_field(prof, field: str, value: str) -> bool:
-    """Compara o valor pedido com prof[field]. Documento: só dígitos; resto: texto sem case."""
-    stored = prof.get(field)
+    """Compara valor da query com prof[field]. Documento: só dígitos; availability: canônico + sinónimos."""
     if field == "professional_document":
-        return clean_document(str(stored or "")) == clean_document(value)
+        return clean_document(str(prof.get(field) or "")) == clean_document(value)
+
+    if field == "profession":
+        want = canonical_profession(value)
+        got = canonical_profession(prof.get("profession"))
+        if want is None or got is None:
+            return False
+        return want == got
+
+    if field == "availability":
+        want_c = canonical_professional_availability(value)
+        got_c = canonical_professional_availability(prof.get("availability"))
+        if want_c and got_c:
+            return want_c == got_c
+        if want_c and not got_c:
+            return False
+        stored = prof.get("availability")
+        if stored is None:
+            return False
+        return str(stored).strip().lower() == value.strip().lower()
+
+    if field in _INT_FILTER_FIELDS:
+        stored = prof.get(field)
+        if stored is None:
+            return False
+        try:
+            return int(stored) == int(str(value).strip())
+        except (TypeError, ValueError):
+            return str(stored) == str(value).strip()
+
+    stored = prof.get(field)
     if stored is None:
         return False
     return str(stored).strip().lower() == value.strip().lower()
 
 
+def _professional_ids_with_consultation_queue_position(handle, position: int) -> set:
+    """professional_id presente em teleconsulta com queue_position == position."""
+    allowed: set = set()
+    for c in handle.find("consultations"):
+        try:
+            qpos = int(c.get("queue_position"))
+        except (TypeError, ValueError):
+            continue
+        if qpos != position:
+            continue
+        for k in ("nurse_id", "doctor_id"):
+            pid = (c.get(k) or "").strip()
+            if pid:
+                allowed.add(pid)
+    return allowed
+
+
+_CONSULTATION_QUEUE_POSITION_KEYS = frozenset(
+    {
+        "consultation_queue_position",
+        "fila_posicao",
+        "posicao_fila",
+        "posicao",
+        "queue_position",
+    }
+)
+
+
 def list_professionals_filtered_response(handle, filters: dict):
+    filters = dict(filters)
+    cpos_raw = None
+    pos_pairs = [(k, filters.pop(k)) for k in list(filters) if k in _CONSULTATION_QUEUE_POSITION_KEYS]
+    if pos_pairs:
+        vals = {str(v).strip() for _, v in pos_pairs}
+        if len(vals) > 1:
+            return {
+                "message": "Use only one of: posicao, fila_posicao, consultation_queue_position, queue_position (same value)",
+                "status": "error",
+                "filters": {**filters, **dict(pos_pairs)},
+            }, 400
+        cpos_raw = pos_pairs[0][1]
+
     professionals = handle.find("professionals")
     normalized = []
     for p in professionals:
@@ -128,10 +205,26 @@ def list_professionals_filtered_response(handle, filters: dict):
         ]
     filtered = _dedupe_professionals_by_id(filtered)
 
+    filters_applied = dict(filters)
+    if cpos_raw is not None:
+        try:
+            pos = int(str(cpos_raw).strip())
+        except ValueError:
+            return {
+                "message": "Invalid consultation queue position (use an integer)",
+                "status": "error",
+                "filters": {**filters_applied, "consultation_queue_position": cpos_raw},
+            }, 400
+        allowed_ids = _professional_ids_with_consultation_queue_position(handle, pos)
+        filtered = [
+            p for p in filtered if (p.get("professional_id") or "") in allowed_ids
+        ]
+        filters_applied["consultation_queue_position"] = pos
+
     return {
         "message": "Professionals listed successfully",
         "status": "success",
-        "filters": filters,
+        "filters": filters_applied,
         "total": len(filtered),
         "professionals": convert_to_serializable(filtered),
     }, 200
@@ -208,6 +301,8 @@ class CreateProfessional(Resource):
                 'labels': PROFESSION_LABELS
             }, 400
 
+        profession = canonical_profession(profession)
+
         if profession == PHYSICIAN_PROFESSION:
             if not credential:
                 return {
@@ -270,10 +365,11 @@ class ListProfessionals(Resource):
     @require_token
     def get(self):
         """
-        GET ?profession=enfermeiro(a) etc.: o nome do parâmetro é o campo no documento;
-        vários parâmetros = todos precisam bater (AND). Sem parâmetros = lista tudo.
-        Único alias: profissao → profession.
-        """
+        Filtros na query (AND); chaves viram minúsculas. Ex.: ?availability=available&profession=enfermeiro(a).
+        availability aceita sinónimos (disponível). Posição na fila (teleconsulta.queue_position):
+        posicao, fila_posicao, consultation_queue_position ou queue_position — ex.: ?availability=available&posicao=1.
+        Campos numéricos no profissional: position, priority. Alias: profissao → profession.
+                """
         handle = get_handle()
         filters = _filters_from_request_args(request.args)
         return list_professionals_filtered_response(handle, filters)
@@ -423,12 +519,12 @@ class UpdateProfessionalByDocument(Resource):
                         'valid_professions': PROFESSION_CHOICES,
                         'labels': PROFESSION_LABELS,
                     }, 400
-                prof['profession'] = profession
+                prof['profession'] = canonical_profession(profession)
 
             if credential is not None:
                 credential = clean_document(credential)
-                eff_prof = profession if profession is not None else (prof.get('profession') or '')
-                if not credential and (eff_prof or '').strip() == PHYSICIAN_PROFESSION:
+                eff_canon = canonical_profession(prof.get("profession")) or ""
+                if not credential and eff_canon == PHYSICIAN_PROFESSION:
                     return {
                         'message': 'credential inválido ou vazio para médico(a)',
                         'status': 'error',
@@ -495,7 +591,7 @@ class UpdateProfessionalAvailability(Resource):
             auto_assignments = []
             if (
                 availability == "available"
-                and (prof.get("profession") or "").strip() == NURSE_PROFESSION
+                and canonical_profession(prof.get("profession")) == NURSE_PROFESSION
             ):
                 drain = drain_waiting_with_available_nurses(handle)
                 auto_assignments = drain.get("assignments") or []

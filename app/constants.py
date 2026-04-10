@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+import re
+import unicodedata
+from typing import Dict, NamedTuple, Tuple
+
 TELEATENDIMENTO_STATUS = {
     'QUEUE': 'queue',
     'WAITING': 'waiting',
@@ -51,27 +57,185 @@ ESPONTANEA_IN_PROGRESS_STATUSES = frozenset({
     'refferal',
 })
 
-PROFESSION_CHOICES = [
-    'médico(a)',
-    'enfermeiro(a)',
-    'psicólogo(a)',
-    'nutricionista',
-    'fisioterapeuta',
-    'dentista',
-]
 
-PROFESSION_LABELS = {
-    'médico(a)': 'Médico(a)',
-    'enfermeiro(a)': 'Enfermeiro(a)',
-    'psicólogo(a)': 'Psicólogo(a)',
-    'nutricionista': 'Nutricionista',
-    'fisioterapeuta': 'Fisioterapeuta',
-    'dentista': 'Dentista',
-}
+def _strip_accents(s: str) -> str:
+    return "".join(
+        c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn"
+    )
 
-NURSE_PROFESSION = 'enfermeiro(a)'
 
-PHYSICIAN_PROFESSION = 'médico(a)'
+def _profession_match_key(s: str) -> str:
+    """Chave estável: sem acento, minúsculo, sem (a)/(o) nem espaços."""
+    t = _strip_accents((s or "").strip().lower())
+    for token in ("(a)", "(o)", "(as)", "(os)", "(a/o)", "(o/a)"):
+        t = t.replace(token, "")
+    t = re.sub(r"[\s.\-_/]+", "", t)
+    return t
+
+
+class ProfessionType(NamedTuple):
+    """
+    Tipo de profissão: id estável (inglês), valor gravado no banco (stored),
+    label de UI e todas as formas aceites (masculino, feminino, (a), sinónimos).
+    """
+
+    id: str
+    stored: str
+    label: str
+    options: Tuple[str, ...]
+
+
+# --- Definição por tipo (Doctor, Nurse, …): opções → mesmo `stored` ---
+Doctor = ProfessionType(
+    id="doctor",
+    stored="médico(a)",
+    label="Médico(a)",
+    options=(
+        "médico(a)",
+        "médico",
+        "médica",
+        "medico(a)",
+        "medico",
+        "medica",
+        "doutor",
+        "doutora",
+        "doctor",
+        "physician",
+    ),
+)
+
+Nurse = ProfessionType(
+    id="nurse",
+    stored="enfermeiro(a)",
+    label="Enfermeiro(a)",
+    options=(
+        "enfermeiro(a)",
+        "enfermeiro",
+        "enfermeira",
+        "nurse",
+    ),
+)
+
+Psychologist = ProfessionType(
+    id="psychologist",
+    stored="psicólogo(a)",
+    label="Psicólogo(a)",
+    options=(
+        "psicólogo(a)",
+        "psicólogo",
+        "psicóloga",
+        "psicologo(a)",
+        "psicologo",
+        "psicologa",
+        "psychologist",
+    ),
+)
+
+Nutritionist = ProfessionType(
+    id="nutritionist",
+    stored="nutricionista",
+    label="Nutricionista",
+    options=(
+        "nutricionista",
+        "nutritionist",
+    ),
+)
+
+Physiotherapist = ProfessionType(
+    id="physiotherapist",
+    stored="fisioterapeuta",
+    label="Fisioterapeuta",
+    options=(
+        "fisioterapeuta",
+        "fisionoterapeuta",
+        "physiotherapist",
+    ),
+)
+
+Dentist = ProfessionType(
+    id="dentist",
+    stored="dentista",
+    label="Dentista",
+    options=(
+        "dentista",
+        "dentist",
+        "odontologo",
+        "odontólogo",
+        "odontologa",
+        "odontóloga",
+        "cirurgião dentista",
+        "cirurgiao dentista",
+    ),
+)
+
+PROFESSION_TYPES: Tuple[ProfessionType, ...] = (
+    Doctor,
+    Nurse,
+    Psychologist,
+    Nutritionist,
+    Physiotherapist,
+    Dentist,
+)
+
+PROFESSION_BY_ID: Dict[str, ProfessionType] = {pt.id: pt for pt in PROFESSION_TYPES}
+PROFESSION_BY_STORED: Dict[str, ProfessionType] = {pt.stored: pt for pt in PROFESSION_TYPES}
+
+PROFESSION_CHOICES = [pt.stored for pt in PROFESSION_TYPES]
+
+PROFESSION_LABELS = {pt.stored: pt.label for pt in PROFESSION_TYPES}
+
+# Compatível com código existente
+NURSE_PROFESSION = Nurse.stored
+PHYSICIAN_PROFESSION = Doctor.stored
+
+# Nomes longos opcionais (export)
+PROFESSION_DOCTOR = Doctor
+PROFESSION_NURSE = Nurse
+PROFESSION_PSYCHOLOGIST = Psychologist
+PROFESSION_NUTRITIONIST = Nutritionist
+PROFESSION_PHYSIOTHERAPIST = Physiotherapist
+PROFESSION_DENTIST = Dentist
+
+
+def _build_profession_alias_map() -> Dict[str, str]:
+    """Mapeia _profession_match_key(opção) → valor `stored` (canónico no banco)."""
+    out: Dict[str, str] = {}
+    for pt in PROFESSION_TYPES:
+        for opt in pt.options:
+            k = _profession_match_key(opt)
+            if k:
+                out[k] = pt.stored
+        sk = _profession_match_key(pt.stored)
+        if sk:
+            out.setdefault(sk, pt.stored)
+    return out
+
+
+_PROFESSION_KEY_TO_CANONICAL = _build_profession_alias_map()
+
+
+def canonical_profession(value) -> str | None:
+    """
+    Normaliza texto para o `stored` de um ProfessionType.
+    Aceita qualquer string listada em `.options` (ex.: enfermeira → enfermeiro(a)).
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    if s in PROFESSION_BY_STORED:
+        return s
+    key = _profession_match_key(s)
+    if key in _PROFESSION_KEY_TO_CANONICAL:
+        c = _PROFESSION_KEY_TO_CANONICAL[key]
+        if c in PROFESSION_BY_STORED:
+            return c
+    for pt in PROFESSION_TYPES:
+        if _profession_match_key(pt.stored) == key:
+            return pt.stored
+    return None
+
 
 def is_valid_status(status):
     """Verifica se o status é válido"""
@@ -92,11 +256,14 @@ def get_type_label(type_value):
 
 
 def is_valid_profession(profession):
-    """Verifica se a profissão é válida"""
-    return profession in PROFESSION_CHOICES
+    """Aceita sinónimos (médico/médica/enfermeiro/enfermeira etc.) e devolve canónico via canonical_profession."""
+    return canonical_profession(profession) is not None
 
 def get_profession_label(profession):
-    """Retorna o label em português da profissão"""
+    """Retorna o label em português da profissão (aceita sinónimos)."""
+    c = canonical_profession(profession)
+    if c:
+        return PROFESSION_LABELS.get(c, profession)
     return PROFESSION_LABELS.get(profession, profession)
 
 
