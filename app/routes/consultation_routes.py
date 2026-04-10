@@ -15,13 +15,16 @@ from flask import request
 from flask_restx import Resource, Namespace
 from app.services.nosql import get_handle
 from app.routes.professional_routes import _professionals_by_document
+from app.routes.queue_routes import recalculate_queue_positions
 from app.services.queue_assignment import (
     drain_waiting_with_available_nurses,
     find_consultations_by_session_hash,
     set_professional_availability_by_id,
 )
+from app.services.default_queue import resolve_operation_queue
 from app.extensions import api
 from app.constants import (
+    ESPONTANEA_IN_PROGRESS_STATUSES,
     TELEATENDIMENTO_STATUS_CHOICES,
     TELEATENDIMENTO_TYPE_CHOICES,
     TELEATENDIMENTO_STATUS_LABELS,
@@ -40,15 +43,74 @@ def clean_document(document):
     return re.sub(r'\D', '', document)
 
 
-def _recalculate_queue_positions(handle, queue_id):
-    entries = handle.find("queue_entries", {"queue_id": queue_id})
-    waiting_entries = [e for e in entries if e.get("status") == "waiting"]
-    waiting_entries.sort(key=lambda item: item.get("created_at", ""))
-    for idx, item in enumerate(waiting_entries, start=1):
-        if item.get("position") != idx:
-            item["position"] = idx
-            item["updated_at"] = datetime.now(timezone.utc).isoformat()
-            handle.save("queue_entries", item)
+def _consultation_filters_from_request_args(args):
+    """Query ?campo=valor → filtro no documento da teleconsulta. session → session_hash."""
+    out = {}
+    for key in args:
+        if key.startswith("_"):
+            continue
+        raw = args.get(key)
+        if raw is None or str(raw).strip() == "":
+            continue
+        low = key.lower()
+        if low == "session":
+            field = "session_hash"
+        elif low in ("cpf", "patient_doc"):
+            field = "patient_document"
+        elif low in ("doc_profissional", "professional_doc"):
+            field = "professional_document"
+        else:
+            field = key
+        out[field] = str(raw).strip()
+    return out
+
+
+def _consultation_matches_field(c, field: str, value: str) -> bool:
+    if field == "session_hash":
+        got = (c.get("session_hash") or "").strip().upper()
+        want = value.strip().upper()
+        return bool(want) and got == want
+    if field in ("patient_document", "professional_document"):
+        return clean_document(str(c.get(field) or "")) == clean_document(value)
+    if field == "queue_position":
+        try:
+            return int(c.get("queue_position")) == int(value)
+        except (TypeError, ValueError):
+            return str(c.get("queue_position")) == str(value).strip()
+    stored = c.get(field)
+    if stored is None:
+        return False
+    if isinstance(stored, bool):
+        lv = value.strip().lower()
+        if lv in ("true", "1", "yes", "sim"):
+            return stored is True
+        if lv in ("false", "0", "no", "nao", "não"):
+            return stored is False
+        return False
+    return str(stored).strip().lower() == value.strip().lower()
+
+
+def _list_consultations_filtered(handle, filters: dict):
+    consultations = handle.find("consultations")
+    if not filters:
+        filtered = consultations
+    else:
+        filtered = [
+            x
+            for x in consultations
+            if all(
+                _consultation_matches_field(x, fname, fval)
+                for fname, fval in filters.items()
+            )
+        ]
+    return {
+        "message": "Consultations listed successfully",
+        "status": "success",
+        "filters": filters,
+        "total": len(filtered),
+        "consultations": [consultation_for_public_response(c) for c in filtered],
+    }, 200
+
 
 ns = Namespace('teleatendimento', description='Endpoints de Teleconsultas')
 api.add_namespace(ns, path='/teleatendimento_')
@@ -97,14 +159,7 @@ class CreateConsultation(Resource):
         specialty = data.get('specialty', '').strip()
         nurse_name = data.get('nurse_name', '').strip()
         nurse_id = ""
-        queue_name = (data.get('queue_name') or '').strip()
-
         if consultation_type == "espontanea":
-            if not queue_name:
-                return {
-                    'message': 'queue_name is required for espontanea consultation',
-                    'status': 'error'
-                }, 400
             # Espontânea entra na fila: não recebe profissional manualmente na criação
             doctor_name = ""
             doctor_id = ""
@@ -177,6 +232,26 @@ class CreateConsultation(Resource):
                 'message': f'Error with patient: {str(e)}',
                 'status': 'error'
             }, 500
+
+        if consultation_type == "espontanea":
+            for c in handle.find("consultations"):
+                if (c.get("type") or "").strip().lower() != "espontanea":
+                    continue
+                st = (c.get("status") or "").strip().lower()
+                if st not in ESPONTANEA_IN_PROGRESS_STATUSES:
+                    continue
+                same_patient = c.get("patient_id") == patient_id
+                same_doc = clean_document(
+                    c.get("patient_document") or ""
+                ) == patient_document and bool(patient_document)
+                if same_patient or same_doc:
+                    return {
+                        'message': 'Patient already has an active spontaneous teleconsultation (queue, waiting, authorized or refferal)',
+                        'status': 'error',
+                        'existing_consultation': convert_to_serializable(
+                            consultation_for_public_response(c)
+                        ),
+                    }, 409
 
         # Profissional (não espontânea): prioridade ao documento; evita cadastro duplicado
         professional_data = None
@@ -275,9 +350,9 @@ class CreateConsultation(Resource):
         scheduled_date = ""
         scheduled_time = ""
         triage = False
-        queue_status = ""
         queue_data = None
-        
+        queue_op_warnings = []
+
         if consultation_type == "agendada":
             scheduled_date = data.get('scheduled_date')
             scheduled_time = data.get('scheduled_time')
@@ -291,20 +366,12 @@ class CreateConsultation(Resource):
         elif consultation_type == "espontanea":
             scheduled_date = date.today().strftime('%Y-%m-%d') 
             scheduled_time = ""
-            queue_status = "waiting"
             try:
-                queues = handle.find("queues", {"name": queue_name})
-                active_queues = [q for q in queues if q.get("status") == "active"]
-                if not active_queues:
-                    return {
-                        'message': 'Active queue not found for queue_name',
-                        'status': 'error',
-                        'queue_name': queue_name
-                    }, 404
-                queue_data = active_queues[0]
+                queue_data, queue_op_warnings = resolve_operation_queue(handle)
+                q_op_id = queue_data.get("queue_id") or queue_data.get("id")
 
                 queue_entries = handle.find(
-                    "queue_entries", {"queue_id": queue_data.get("queue_id")}
+                    "queue_entries", {"queue_id": q_op_id}
                 )
                 duplicate = [
                     e
@@ -322,8 +389,9 @@ class CreateConsultation(Resource):
                     return {
                         'message': 'Patient already in queue',
                         'status': 'error',
-                        'queue_name': queue_name,
+                        'queue_id': q_op_id,
                         'entry': convert_to_serializable(duplicate[0]),
+                        'queue_operational_warnings': queue_op_warnings,
                     }, 409
             except Exception as e:
                 return {
@@ -332,6 +400,14 @@ class CreateConsultation(Resource):
                 }, 500
 
         # Create consultation
+        consultation_initial_status = (
+            "queue" if consultation_type == "espontanea" else "waiting"
+        )
+        qid_for_consult = (
+            queue_data.get("queue_id") or queue_data.get("id") or ""
+            if consultation_type == "espontanea" and queue_data
+            else ""
+        )
         consultation = Consultation(
             patient_id=patient_id,
             patient_name=patient_name,
@@ -347,8 +423,9 @@ class CreateConsultation(Resource):
             rating=0,
             comment='',
             type=consultation_type,
-            queue_name=queue_name if consultation_type == "espontanea" else "",
-            queue_status=queue_status,
+            queue_id=qid_for_consult,
+            queue_position=-1,
+            status=consultation_initial_status,
         )
         
         # Generate hash based on consultation ID
@@ -420,24 +497,26 @@ class CreateConsultation(Resource):
             queue_entry_data = queue_entry.to_dict()
             handle.save("queue_entries", queue_entry_data)
 
-            waiting_entries = handle.find(
-                "queue_entries", {"queue_id": queue_entry_data.get("queue_id")}
+            waiting_entries = recalculate_queue_positions(
+                handle, queue_entry_data.get("queue_id") or ""
             )
-            waiting_entries = [e for e in waiting_entries if e.get("status") == "waiting"]
-            waiting_entries.sort(key=lambda item: item.get("created_at", ""))
-            for idx, item in enumerate(waiting_entries, start=1):
-                if item.get("position") != idx:
-                    item["position"] = idx
-                    item["updated_at"] = datetime.now(timezone.utc).isoformat()
-                    handle.save("queue_entries", item)
-                if item.get("entry_id") == queue_entry_data.get("entry_id"):
-                    queue_position = idx
+            queue_position = next(
+                (
+                    item.get("position")
+                    for item in waiting_entries
+                    if item.get("entry_id") == queue_entry_data.get("entry_id")
+                ),
+                None,
+            )
 
             drain = drain_waiting_with_available_nurses(handle)
             auto_assignments = drain.get("assignments") or []
             tele_refresh = find_consultations_by_session_hash(handle, session_hash)
             if tele_refresh:
                 consultation_data = tele_refresh[0]
+                qp = consultation_data.get("queue_position")
+                if qp is not None:
+                    queue_position = qp
             refreshed_entry = handle.find(
                 "queue_entries", {"entry_id": queue_entry.entry_id}
             )
@@ -451,8 +530,7 @@ class CreateConsultation(Resource):
             'consultation': consultation_for_public_response(consultation_data),
             'queue': convert_to_serializable({
                 'queue_id': queue_data.get("queue_id") if queue_data else None,
-                'queue_name': queue_name if consultation_type == "espontanea" else "",
-                'queue_status': queue_status,
+                'queue_label': queue_data.get("name") if queue_data else "",
                 'entry': queue_entry_data,
                 'position': queue_position,
             }),
@@ -467,22 +545,22 @@ class CreateConsultation(Resource):
                 'type': consultation_type
             },
             'auto_assignments': convert_to_serializable(auto_assignments),
+            'queue_operational_warnings': queue_op_warnings,
         }, 201
 
 @ns.route('listar')
 class ListConsultations(Resource):
     @require_token
     def get(self):
-        """Listar todas as teleconsultas"""
+        """
+        Lista teleconsultas. ?campo=valor filtra pelo campo (AND).
+        Ex.: ?session=ABC123 ou ?session_hash=ABC123, ?status=waiting, ?patient_document=...
+        Aliases: session→session_hash; cpf, patient_doc→patient_document;
+        doc_profissional, professional_doc→professional_document.
+        """
         handle = get_handle()
-
-        consultations = handle.find("consultations")
-
-        return {
-            'message': 'Consultations listed successfully',
-            'consultations': [consultation_for_public_response(c) for c in consultations],
-            'total': len(consultations)
-        }, 200
+        filters = _consultation_filters_from_request_args(request.args)
+        return _list_consultations_filtered(handle, filters)
 
 @ns.route('buscar/<string:session_hash>')
 class SearchConsultation(Resource):
@@ -655,12 +733,11 @@ class InsertNurseIntoConsultation(Resource):
         data = request.get_json() or {}
 
         professional_document = clean_document(data.get('professional_document') or '')
-        queue_name = (data.get('queue_name') or '').strip()
         session_hash = (data.get('session_hash') or '').strip().upper()
 
-        if not professional_document or not queue_name or not session_hash:
+        if not professional_document or not session_hash:
             return {
-                'message': 'professional_document, queue_name and session_hash are required',
+                'message': 'professional_document and session_hash are required',
                 'status': 'error',
             }, 400
 
@@ -682,15 +759,7 @@ class InsertNurseIntoConsultation(Resource):
                     'professional_document': professional_document,
                 }, 404
 
-            queues = handle.find("queues", {"name": queue_name})
-            active_queues = [q for q in queues if q.get("status") == "active"]
-            if not active_queues:
-                return {
-                    'message': 'Active queue not found for queue_name',
-                    'status': 'not_found',
-                    'queue_name': queue_name,
-                }, 404
-            queue = active_queues[0]
+            queue, queue_op_warnings = resolve_operation_queue(handle)
             queue_id = queue.get("queue_id") or queue.get("id")
 
             tele_list = handle.find("consultations", {"session_hash": session_hash})
@@ -716,7 +785,7 @@ class InsertNurseIntoConsultation(Resource):
                 return {
                     'message': 'Waiting queue entry not found for this consultation in queue',
                     'status': 'not_found',
-                    'queue_name': queue_name,
+                    'queue_id': queue_id,
                     'session_hash': session_hash,
                 }, 404
 
@@ -725,8 +794,8 @@ class InsertNurseIntoConsultation(Resource):
             ndoc = clean_document(nurse.get("professional_document") or "")
             if ndoc:
                 tele["professional_document"] = ndoc
-            tele["queue_name"] = queue_name
-            tele["queue_status"] = ""
+            tele["queue_id"] = queue_id
+            tele["queue_position"] = -1
             tele["status"] = "waiting"
             tele["updated_at"] = datetime.now(timezone.utc).isoformat()
             handle.save("consultations", tele)
@@ -740,13 +809,17 @@ class InsertNurseIntoConsultation(Resource):
             entry["removed_at"] = datetime.now(timezone.utc).isoformat()
             entry["updated_at"] = entry["removed_at"]
             handle.save("queue_entries", entry)
-            _recalculate_queue_positions(handle, queue_id)
+            recalculate_queue_positions(handle, queue_id)
 
             return {
                 'message': 'Nurse inserted into consultation successfully',
                 'status': 'success',
                 'consultation': consultation_for_public_response(tele),
                 'queue_entry': convert_to_serializable(entry),
+                'operational_queue': convert_to_serializable(
+                    {'queue_id': queue.get('queue_id'), 'name': queue.get('name')}
+                ),
+                'queue_operational_warnings': queue_op_warnings,
             }, 200
         except Exception as e:
             return {

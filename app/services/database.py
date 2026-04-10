@@ -95,11 +95,21 @@ def save_document(collection_name: str, document: Dict[str, Any]) -> Dict[str, A
     if unique_field:
         update_data = dict(document)
         update_data.pop("_id", None)
-        result = coll.update_one(
-            {unique_field: unique_value},
-            {"$set": update_data},
-            upsert=True,
-        )
+        if collection_name == "consultations":
+            result = coll.update_one(
+                {unique_field: unique_value},
+                [
+                    {"$set": update_data},
+                    {"$unset": ["queue_status", "queue_name"]},
+                ],
+                upsert=True,
+            )
+        else:
+            result = coll.update_one(
+                {unique_field: unique_value},
+                {"$set": update_data},
+                upsert=True,
+            )
         return {
             "success": True,
             "operation": "upsert",
@@ -116,6 +126,17 @@ def save_document(collection_name: str, document: Dict[str, Any]) -> Dict[str, A
     }
 
 
+def delete_many_documents(collection_name: str, filter_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove documentos que batem com o filtro (Mongo delete_many)."""
+    db = get_mongo_database()
+    coll = db[collection_name]
+    result = coll.delete_many(filter_dict)
+    return {
+        "success": True,
+        "deleted_count": result.deleted_count,
+    }
+
+
 class MongoHandle:
     """Facade usada pelas rotas (compatível com o padrão antigo handle.find / handle.save)."""
 
@@ -124,6 +145,9 @@ class MongoHandle:
 
     def save(self, collection: str, document: Dict[str, Any]) -> Dict[str, Any]:
         return save_document(collection, document)
+
+    def delete_many(self, collection: str, filter_dict: Dict[str, Any]) -> Dict[str, Any]:
+        return delete_many_documents(collection, filter_dict)
 
 
 _handle: Optional[MongoHandle] = None

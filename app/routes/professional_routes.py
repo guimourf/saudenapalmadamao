@@ -69,6 +69,74 @@ def _professional_by_document(handle, raw_document):
     return rows[0], doc
 
 
+def _dedupe_professionals_by_id(professionals):
+    by_id = {}
+    no_id = []
+    for p in professionals:
+        pid = p.get("professional_id") or ""
+        if not pid:
+            no_id.append(p)
+            continue
+        prev = by_id.get(pid)
+        if prev is None or (p.get("updated_at") or "") > (prev.get("updated_at") or ""):
+            by_id[pid] = p
+    return list(by_id.values()) + no_id
+
+def _filters_from_request_args(args):
+    """Cada ?nome=valor usa o mesmo nome de campo do documento. Ignora chaves que começam com _."""
+    out = {}
+    for key in args:
+        if key.startswith("_"):
+            continue
+        raw = args.get(key)
+        if raw is None or str(raw).strip() == "":
+            continue
+        field = key
+        if key.lower() == "profissao":
+            field = "profession"
+        out[field] = str(raw).strip()
+    return out
+
+
+def _profession_matches_field(prof, field: str, value: str) -> bool:
+    """Compara o valor pedido com prof[field]. Documento: só dígitos; resto: texto sem case."""
+    stored = prof.get(field)
+    if field == "professional_document":
+        return clean_document(str(stored or "")) == clean_document(value)
+    if stored is None:
+        return False
+    return str(stored).strip().lower() == value.strip().lower()
+
+
+def list_professionals_filtered_response(handle, filters: dict):
+    professionals = handle.find("professionals")
+    normalized = []
+    for p in professionals:
+        p, _ = _normalize_professional_availability(handle, p)
+        normalized.append(p)
+
+    if not filters:
+        filtered = normalized
+    else:
+        filtered = [
+            p
+            for p in normalized
+            if all(
+                _profession_matches_field(p, fname, fval)
+                for fname, fval in filters.items()
+            )
+        ]
+    filtered = _dedupe_professionals_by_id(filtered)
+
+    return {
+        "message": "Professionals listed successfully",
+        "status": "success",
+        "filters": filters,
+        "total": len(filtered),
+        "professionals": convert_to_serializable(filtered),
+    }, 200
+
+
 def _normalize_professional_availability(handle, prof):
     """Garante availability nos 4 estados canônicos (inglês); normaliza sinônimos em PT."""
     updated = False
@@ -201,52 +269,50 @@ class CreateProfessional(Resource):
 class ListProfessionals(Resource):
     @require_token
     def get(self):
+        """
+        GET ?profession=enfermeiro(a) etc.: o nome do parâmetro é o campo no documento;
+        vários parâmetros = todos precisam bater (AND). Sem parâmetros = lista tudo.
+        Único alias: profissao → profession.
+        """
         handle = get_handle()
-
-        professionals = handle.find("professionals")
-        normalized = []
-        for p in professionals:
-            p, _ = _normalize_professional_availability(handle, p)
-            normalized.append(p)
-
-        return {
-            'message': 'Professionals listed successfully',
-            'professionals': convert_to_serializable(normalized)
-        }, 200
+        filters = _filters_from_request_args(request.args)
+        return list_professionals_filtered_response(handle, filters)
 
 
 @ns.route('filtrar_profissao/<string:profession>')
 class ListProfessionalsByProfession(Resource):
-    """Lista todos os profissionais com a profissão informada. Um profissional específico: GET buscar/<professional_document>."""
+    """Legado: mesmo que listar?profession=..."""
 
     @require_token
     def get(self, profession):
         handle = get_handle()
-        profession = (profession or "").strip().lower()
+        profession = (profession or "").strip()
         if not profession:
             return {
                 'message': 'profession is required',
                 'status': 'error',
             }, 400
-        professionals = handle.find("professionals")
-        by_id: dict = {}
-        no_id: list = []
-        for p in professionals:
-            if (p.get("profession") or "").strip().lower() != profession:
-                continue
-            p, _ = _normalize_professional_availability(handle, p)
-            pid = p.get("professional_id") or ""
-            if not pid:
-                no_id.append(p)
-                continue
-            prev = by_id.get(pid)
-            if prev is None or (p.get("updated_at") or "") > (prev.get("updated_at") or ""):
-                by_id[pid] = p
-        filtered = list(by_id.values()) + no_id
+        return list_professionals_filtered_response(handle, {"profession": profession})
+
+
+@ns.route('disponiveis')
+class ListAvailableProfessionals(Resource):
+    """Legado: lista enfermeiros no critério da fila (duplicatas/linhas mistas tratadas no serviço)."""
+
+    @require_token
+    def get(self):
+        handle = get_handle()
+        try:
+            filtered = list_nurses_marked_available(handle)
+        except Exception as e:
+            return {
+                'message': f'Error listing available professionals: {str(e)}',
+                'status': 'error',
+            }, 500
         return {
-            'message': 'Professionals listed by profession successfully',
+            'message': 'Available nurses listed successfully',
             'status': 'success',
-            'profession': profession,
+            'filters': {},
             'total': len(filtered),
             'professionals': convert_to_serializable(filtered),
         }, 200
@@ -385,26 +451,6 @@ class UpdateProfessionalByDocument(Resource):
         except Exception as e:
             return {
                 'message': f'Error updating professional: {str(e)}',
-                'status': 'error',
-            }, 500
-
-
-@ns.route('disponiveis')
-class ListAvailableProfessionals(Resource):
-    @require_token
-    def get(self):
-        handle = get_handle()
-        try:
-            filtered = list_nurses_marked_available(handle)
-            return {
-                'message': 'Available nurses listed successfully',
-                'status': 'success',
-                'total': len(filtered),
-                'professionals': convert_to_serializable(filtered),
-            }, 200
-        except Exception as e:
-            return {
-                'message': f'Error listing available professionals: {str(e)}',
                 'status': 'error',
             }, 500
 

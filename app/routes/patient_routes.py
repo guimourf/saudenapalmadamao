@@ -12,6 +12,55 @@ def clean_document(document):
         return ""
     return re.sub(r'\D', '', document)
 
+
+def _patient_filters_from_request_args(args):
+    out = {}
+    for key in args:
+        if key.startswith("_"):
+            continue
+        raw = args.get(key)
+        if raw is None or str(raw).strip() == "":
+            continue
+        low = key.lower()
+        if low in ("cpf", "doc"):
+            field = "document"
+        else:
+            field = key
+        out[field] = str(raw).strip()
+    return out
+
+
+def _patient_matches_field(patient, field: str, value: str) -> bool:
+    stored = patient.get(field)
+    if field == "document":
+        return clean_document(str(stored or "")) == clean_document(value)
+    if stored is None:
+        return False
+    return str(stored).strip().lower() == value.strip().lower()
+
+
+def _list_patients_filtered(handle, filters: dict):
+    patients = handle.find("patients")
+    if not filters:
+        filtered = patients
+    else:
+        filtered = [
+            p
+            for p in patients
+            if all(
+                _patient_matches_field(p, fname, fval)
+                for fname, fval in filters.items()
+            )
+        ]
+    return {
+        "message": "Patients listed successfully",
+        "status": "success",
+        "filters": filters,
+        "total": len(filtered),
+        "patients": [convert_to_serializable(p) for p in filtered],
+    }, 200
+
+
 ns = Namespace('paciente', description='Endpoints de Pacientes')
 api.add_namespace(ns, path='/paciente_')
 
@@ -64,13 +113,10 @@ class CreatePatient(Resource):
 class ListPatients(Resource):
     @require_token
     def get(self):
-        """Listar todos os pacientes"""
+        """
+        Lista pacientes. Query ?campo=valor filtra pelo campo no documento (AND).
+        Ex.: ?document=123... ou ?cpf=... (vai para document). Sem params = todos.
+        """
         handle = get_handle()
-
-        patients = handle.find("patients")
-
-        return {
-            'message': 'Patients listed successfully',
-            'patients': [convert_to_serializable(p) for p in patients],
-            'total': len(patients)
-        }, 200
+        filters = _patient_filters_from_request_args(request.args)
+        return _list_patients_filtered(handle, filters)

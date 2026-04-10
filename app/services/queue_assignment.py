@@ -38,6 +38,42 @@ def find_consultations_by_session_hash(
     )
 
 
+def mark_consultation_queue_position_cleared(handle, consultation_hash: str) -> None:
+    """Teleconsulta não está mais na fila de espera (ex.: remoção manual da fila)."""
+    ch = normalize_session_hash(consultation_hash)
+    if not ch:
+        return
+    docs = find_consultations_by_session_hash(handle, ch)
+    if not docs:
+        return
+    tele = dict(docs[0])
+    tele["queue_position"] = -1
+    tele["updated_at"] = datetime.now(timezone.utc).isoformat()
+    handle.save("consultations", tele)
+
+
+def sync_queue_entry_positions_to_consultations(handle, queue_id: str) -> None:
+    """Atualiza queue_position nas teleconsultas ligadas às entradas em espera desta fila."""
+    qid = (queue_id or "").strip()
+    if not qid:
+        return
+    entries = handle.find("queue_entries", {"queue_id": qid, "status": "waiting"})
+    entries.sort(key=lambda item: item.get("created_at", ""))
+    for e in entries:
+        ch = normalize_session_hash(e.get("consultation_hash") or "")
+        if not ch:
+            continue
+        docs = find_consultations_by_session_hash(handle, ch)
+        if not docs:
+            continue
+        tele = dict(docs[0])
+        pos = int(e.get("position") or 0)
+        if tele.get("queue_position") != pos:
+            tele["queue_position"] = pos
+            tele["updated_at"] = datetime.now(timezone.utc).isoformat()
+            handle.save("consultations", tele)
+
+
 def coerce_professional_cadastro_status(prof: Dict[str, Any]) -> None:
     """Garante status de cadastro em active/inactive (corrige valores legados ex.: indisponivel no campo errado)."""
     st = (prof.get("status") or "").strip().lower()
@@ -151,7 +187,7 @@ def assign_nurse_to_waiting_entry(
     ndoc = _clean_professional_document(nurse.get("professional_document"))
     if ndoc:
         tele["professional_document"] = ndoc
-    tele["queue_status"] = ""
+    tele["queue_position"] = -1
     tele["status"] = "waiting"
     tele["updated_at"] = datetime.now(timezone.utc).isoformat()
     handle.save("consultations", tele)

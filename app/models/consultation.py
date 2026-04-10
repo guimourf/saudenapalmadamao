@@ -20,8 +20,8 @@ class Consultation:
                  meet_link: str = "",
                  host_url: str = "",
                  session_hash: str = "",
-                 queue_name: str = "",
-                 queue_status: str = "",
+                 queue_id: str = "",
+                 queue_position: int = -1,
                  rating: int = 0,
                  comment: str = "",
                  type: str = "",
@@ -49,8 +49,8 @@ class Consultation:
         self.meet_link = meet_link
         self.host_url = host_url
         self.session_hash = session_hash
-        self.queue_name = queue_name
-        self.queue_status = queue_status
+        self.queue_id = queue_id
+        self.queue_position = queue_position
         self.rating = rating
         self.comment = comment
         self.type = type
@@ -88,8 +88,8 @@ class Consultation:
             "meet_link": self.meet_link,
             "host_url": self.host_url,
             "session_hash": self.session_hash,
-            "queue_name": self.queue_name,
-            "queue_status": self.queue_status,
+            "queue_id": self.queue_id,
+            "queue_position": self.queue_position,
             "rating": self.rating,
             "comment": self.comment,
             "feedback": self.comment,
@@ -109,6 +109,11 @@ class Consultation:
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Consultation':
+        qp = data.get("queue_position")
+        try:
+            queue_position = int(qp) if qp is not None else -1
+        except (TypeError, ValueError):
+            queue_position = -1
         consultation = cls(
             patient_id=data.get("patient_id", ""),
             patient_name=data.get("patient_name", ""),
@@ -126,8 +131,8 @@ class Consultation:
             meet_link=data.get("meet_link", ""),
             host_url=data.get("host_url", ""),
             session_hash=data.get("session_hash", ""),
-            queue_name=data.get("queue_name", ""),
-            queue_status=data.get("queue_status", ""),
+            queue_id=(data.get("queue_id") or ""),
+            queue_position=queue_position,
             type=data.get("type", ""),
             consultation_id=data.get("consultation_id") or data.get("id"),
             status=data.get("status", "waiting"),

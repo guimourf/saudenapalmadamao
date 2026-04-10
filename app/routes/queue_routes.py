@@ -7,6 +7,7 @@ from flask import request
 from flask_restx import Resource, Namespace
 from app.services.nosql import get_handle
 from app.services.queue_assignment import drain_waiting_with_available_nurses
+from app.services.default_queue import resolve_operation_queue
 from app.extensions import api
 import re
 
@@ -29,17 +30,18 @@ def recalculate_queue_positions(handle, queue_id):
             item["position"] = idx
             item["updated_at"] = datetime.now(timezone.utc).isoformat()
             handle.save("queue_entries", item)
+    from app.services.queue_assignment import sync_queue_entry_positions_to_consultations
+
+    sync_queue_entry_positions_to_consultations(handle, queue_id)
     return waiting_entries
 
 
 def add_patient_to_queue(handle, data):
-    queue_id = (data.get("queue_id") or "").strip()
+    queue_doc, op_warnings = resolve_operation_queue(handle)
+    queue_id = (queue_doc.get("queue_id") or queue_doc.get("id") or "").strip()
     patient_name = (data.get("patient_name") or "").strip()
     patient_document = clean_document(data.get("patient_document", ""))
     consultation_hash = (data.get("consultation_hash") or "").strip().upper()
-
-    if not queue_id:
-        return {"message": "queue_id is required", "status": "error"}, 400
 
     missing = []
     if not patient_name:
@@ -143,6 +145,11 @@ def add_patient_to_queue(handle, data):
     return {
         "message": "Patient added to queue successfully",
         "status": "success",
+        "queue_id": queue_id,
+        "operational_queue": convert_to_serializable(
+            {"queue_id": queue_doc.get("queue_id"), "name": queue_doc.get("name")}
+        ),
+        "queue_operational_warnings": op_warnings,
         "entry": convert_to_serializable(entry_data),
         "position": position,
         "queue_size": queue_size,
@@ -153,11 +160,9 @@ def add_patient_to_queue(handle, data):
 
 
 def pop_from_queue(handle, data):
-    queue_id = (data.get("queue_id") or "").strip()
+    queue_doc, op_warnings = resolve_operation_queue(handle)
+    queue_id = (queue_doc.get("queue_id") or queue_doc.get("id") or "").strip()
     patient_document = clean_document(data.get("patient_document", "") or "")
-
-    if not queue_id:
-        return {"message": "queue_id is required", "status": "error"}, 400
 
     try:
         entries = handle.find("queue_entries", {"queue_id": queue_id})
@@ -194,12 +199,22 @@ def pop_from_queue(handle, data):
         next_entry["updated_at"] = next_entry["removed_at"]
 
         handle.save("queue_entries", next_entry)
+        from app.services.queue_assignment import mark_consultation_queue_position_cleared
+
+        mark_consultation_queue_position_cleared(
+            handle, next_entry.get("consultation_hash") or ""
+        )
         waiting_entries = recalculate_queue_positions(handle, queue_id)
 
         remaining = len(waiting_entries)
         return {
             "message": "Patient removed from queue",
             "status": "success",
+            "queue_id": queue_id,
+            "operational_queue": convert_to_serializable(
+                {"queue_id": queue_doc.get("queue_id"), "name": queue_doc.get("name")}
+            ),
+            "queue_operational_warnings": op_warnings,
             "entry": convert_to_serializable(next_entry),
             "remaining": max(remaining, 0),
         }, 200
@@ -294,6 +309,54 @@ class CreateQueue(Resource):
         }, 201
 
 
+@ns.route("apagar/<string:queue_id>")
+class DeleteQueue(Resource):
+    @require_token
+    def delete(self, queue_id):
+        """Remove a fila do banco e todas as queue_entries associadas."""
+        handle = get_handle()
+        qid = (queue_id or "").strip()
+        if not qid:
+            return {"message": "queue_id is required", "status": "error"}, 400
+
+        try:
+            queues = handle.find(
+                "queues", {"$or": [{"queue_id": qid}, {"id": qid}]}
+            )
+            if not queues:
+                return {
+                    "message": "Queue not found",
+                    "status": "not_found",
+                    "queue_id": qid,
+                }, 404
+
+            queue = queues[0]
+            canonical_id = (queue.get("queue_id") or queue.get("id") or qid).strip()
+
+            entries_res = handle.delete_many(
+                "queue_entries", {"queue_id": canonical_id}
+            )
+            queue_res = handle.delete_many(
+                "queues",
+                {"$or": [{"queue_id": canonical_id}, {"id": canonical_id}]},
+            )
+
+            return {
+                "message": "Queue deleted successfully",
+                "status": "success",
+                "queue_id": canonical_id,
+                "queue_name": queue.get("name"),
+                "entries_removed": entries_res.get("deleted_count", 0),
+                "queues_removed": queue_res.get("deleted_count", 0),
+            }, 200
+        except Exception as e:
+            return {
+                "message": f"Error deleting queue: {str(e)}",
+                "status": "error",
+                "queue_id": qid,
+            }, 500
+
+
 @ns.route("adicionar")
 class AddPatientToQueue(Resource):
     @require_token
@@ -331,6 +394,23 @@ class PopQueueEn(Resource):
         handle = get_handle()
         data = request.get_json() or {}
         body, code = pop_from_queue(handle, data)
+        return body, code
+
+
+@ns.route("espera")
+class QueueWaitingOperational(Resource):
+    @require_token
+    def get(self):
+        handle = get_handle()
+        q, warnings = resolve_operation_queue(handle)
+        qid = (q.get("queue_id") or q.get("id") or "").strip()
+        body, code = waiting_for_queue(handle, qid)
+        if isinstance(body, dict):
+            body["queue_operational_warnings"] = warnings
+            if code == 200:
+                body["operational_queue"] = convert_to_serializable(
+                    {"queue_id": q.get("queue_id"), "name": q.get("name")}
+                )
         return body, code
 
 
@@ -389,11 +469,33 @@ class ListQueues(Resource):
                 queue_info["total"] = len(queue_info["patients"])
                 queues_with_patients.append(queue_info)
 
+            op_q, op_warnings = resolve_operation_queue(handle)
+            op_id = (op_q.get("queue_id") or op_q.get("id") or "").strip()
+            # Uma única fila na resposta: a operacional (mesma de adicionar/espontânea/espera).
+            single_queue = [
+                qi
+                for qi in queues_with_patients
+                if str(
+                    (qi.get("queue") or {}).get("queue_id")
+                    or (qi.get("queue") or {}).get("id")
+                    or ""
+                )
+                == op_id
+            ]
+
             return {
-                "message": "Queues listed successfully",
+                "message": "Operational queue listed successfully",
                 "status": "success",
-                "queues": queues_with_patients,
-                "total": len(queues_with_patients),
+                "queues": single_queue,
+                "total": len(single_queue),
+                "operational_queue": convert_to_serializable(
+                    {
+                        "queue_id": op_q.get("queue_id"),
+                        "name": op_q.get("name"),
+                        "is_default": bool(op_q.get("is_default")),
+                    }
+                ),
+                "queue_operational_warnings": op_warnings,
             }, 200
         except Exception as e:
             return {

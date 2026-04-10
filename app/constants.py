@@ -1,4 +1,5 @@
 TELEATENDIMENTO_STATUS = {
+    'QUEUE': 'queue',
     'WAITING': 'waiting',
     'TRIAGE': 'triage',
     'REFFERRAL': 'refferal',
@@ -7,7 +8,8 @@ TELEATENDIMENTO_STATUS = {
     'CANCELLED': 'cancelled',
 }
 
-TELEATENDIMENTO_STATUS_CHOICES = [  
+TELEATENDIMENTO_STATUS_CHOICES = [
+    'queue',
     'waiting',
     'triage',
     'refferal',
@@ -17,6 +19,7 @@ TELEATENDIMENTO_STATUS_CHOICES = [
 ]
 
 TELEATENDIMENTO_STATUS_LABELS = {
+    'queue': 'Na fila',
     'waiting': 'Aguardando',
     'triage': 'Triagem',
     'refferal': 'Reagendado',
@@ -39,6 +42,14 @@ TELEATENDIMENTO_TYPE_LABELS = {
     'agendada': 'Agendada',
     'espontanea': 'Espontânea',
 }
+
+# Espontânea ainda "em curso": não permitir segunda espontânea para o mesmo paciente.
+ESPONTANEA_IN_PROGRESS_STATUSES = frozenset({
+    'queue',
+    'waiting',
+    'authorized',
+    'refferal',
+})
 
 PROFESSION_CHOICES = [
     'médico(a)',
