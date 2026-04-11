@@ -539,7 +539,8 @@ class CreateConsultation(Resource):
             }),
             'links': {
                 'patient_link': consultation.session_link,
-                'doctor_link': consultation.doctor_link,
+                'doctor_link': consultation_data.get('doctor_link')
+                or consultation.doctor_link,
                 'session_hash': session_hash,
             },
             'schedule': {
@@ -797,6 +798,7 @@ class InsertNurseIntoConsultation(Resource):
             ndoc = clean_document(nurse.get("professional_document") or "")
             if ndoc:
                 tele["professional_document"] = ndoc
+            tele["doctor_link"] = create_doctor_url(session_hash)
             tele["queue_id"] = queue_id
             tele["queue_position"] = -1
             tele["status"] = "waiting"

@@ -11,6 +11,7 @@ from app.constants import (
     canonical_profession,
     canonical_professional_availability,
 )
+from app.services.session_link import create_doctor_url
 
 def normalize_session_hash(value: Optional[str]) -> str:
     return (value or "").strip().upper()
@@ -188,6 +189,9 @@ def assign_nurse_to_waiting_entry(
     ndoc = _clean_professional_document(nurse.get("professional_document"))
     if ndoc:
         tele["professional_document"] = ndoc
+    sh = (tele.get("session_hash") or consultation_hash or "").strip()
+    if sh:
+        tele["doctor_link"] = create_doctor_url(sh)
     tele["queue_position"] = -1
     tele["status"] = "waiting"
     tele["updated_at"] = datetime.now(timezone.utc).isoformat()
