@@ -475,9 +475,9 @@ class CreateConsultation(Resource):
                 }, 500
 
         consultation.session_link = create_session_url(session_hash)
-        consultation.doctor_link = (
-            create_doctor_url(session_hash) if consultation_type != "espontanea" else ""
-        )
+        # Mesmo na espontânea: URL do profissional (intro-consultório) é fixa pelo session_hash;
+        # enfermeiro pode não estar atrelado ainda (fila FIFO no drain).
+        consultation.doctor_link = create_doctor_url(session_hash)
         consultation.session_hash = session_hash
         consultation.meet_link = meet_link
         consultation.host_url = host_url
