@@ -6,8 +6,8 @@ from flask_restx import Resource, Namespace
 from app.services.nosql import get_handle
 from app.services.queue_assignment import (
     coerce_professional_cadastro_status,
-    drain_waiting_with_available_nurses,
     list_nurses_marked_available,
+    set_professional_availability_by_id,
 )
 from app.extensions import api
 from datetime import datetime, timezone
@@ -366,8 +366,9 @@ class CreateProfessional(Resource):
         auto_assignment = None
         auto_assignments = []
         if profession == NURSE_PROFESSION and availability == "available":
-            drain = drain_waiting_with_available_nurses(handle)
-            auto_assignments = drain.get("assignments") or []
+            auto_assignments = set_professional_availability_by_id(
+                handle, professional_data.get("professional_id") or "", "available"
+            )
             pid = professional_data.get("professional_id")
             auto_assignment = next(
                 (a for a in auto_assignments if a.get("nurse_id") == pid),
@@ -604,20 +605,18 @@ class UpdateProfessionalAvailability(Resource):
                 }, 404
             prof, _ = _normalize_professional_availability(handle, prof)
 
-            prof['availability'] = availability
-            prof['updated_at'] = datetime.now(timezone.utc).isoformat()
-
-            handle.save('professionals', prof)
+            pid = prof.get("professional_id") or ""
+            auto_assignments = set_professional_availability_by_id(
+                handle, pid, availability
+            )
+            rows = handle.find("professionals", {"professional_id": pid})
+            prof = dict(rows[0]) if rows else prof
 
             auto_assignment = None
-            auto_assignments = []
             if (
                 availability == "available"
                 and canonical_profession(prof.get("profession")) == NURSE_PROFESSION
             ):
-                drain = drain_waiting_with_available_nurses(handle)
-                auto_assignments = drain.get("assignments") or []
-                pid = prof.get("professional_id")
                 auto_assignment = next(
                     (a for a in auto_assignments if a.get("nurse_id") == pid),
                     None,

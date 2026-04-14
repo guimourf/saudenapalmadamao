@@ -888,9 +888,7 @@ class UpdateConsultationStatus(Resource):
             }, 400
 
         try:
-            tele_list = handle.find(
-                "consultations", {"session_hash": session_hash}
-            )
+            tele_list = find_consultations_by_session_hash(handle, session_hash)
             if not tele_list:
                 return {
                     'message': 'Consultation not found',
@@ -905,16 +903,19 @@ class UpdateConsultationStatus(Resource):
 
             handle.save("consultations", tele)
 
+            auto_assignments = []
             if new_status in ("completed", "cancelled") and prev_nurse_id:
-                set_professional_availability_by_id(
+                # Libera enfermeiro e, se ficar available, já tenta atribuir próximo da fila (centralizado no serviço).
+                auto_assignments = set_professional_availability_by_id(
                     handle, prev_nurse_id, "available"
                 )
 
             return {
                 'message': 'Consultation status updated successfully',
                 'status': 'success',
-                'session_hash': session_hash,
-                'new_status': new_status
+                'session_hash': tele.get('session_hash') or session_hash,
+                'new_status': new_status,
+                'auto_assignments': convert_to_serializable(auto_assignments),
             }, 200
 
         except Exception as e:

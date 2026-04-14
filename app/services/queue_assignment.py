@@ -100,20 +100,30 @@ def _normalize_professional_availability_no_persist(prof: Dict[str, Any]) -> Dic
 
 def set_professional_availability_by_id(
     handle, professional_id: str, availability_value: str
-) -> None:
+) -> List[Dict[str, Any]]:
+    """
+    Persiste availability do profissional.
+    Se for enfermeiro e ficar `available`, roda o drain da fila (prioriza este profissional).
+    Retorna lista de auto-assignments desse drain (vazia se não aplicável).
+    """
     pid = (professional_id or "").strip()
     if not pid:
-        return
+        return []
     av = canonical_professional_availability(availability_value)
     if not av or av not in PROFESSIONAL_AVAILABILITY_CHOICES:
-        return
+        return []
     rows = handle.find("professionals", {"professional_id": pid})
     if not rows:
-        return
+        return []
     prof = dict(rows[0])
     prof["availability"] = av
     prof["updated_at"] = datetime.now(timezone.utc).isoformat()
     handle.save("professionals", prof)
+
+    if av == "available" and canonical_profession(prof.get("profession")) == NURSE_PROFESSION:
+        drain = drain_waiting_with_available_nurses(handle, prefer_nurse_id=pid)
+        return list(drain.get("assignments") or [])
+    return []
 
 
 def _nurse_eligible_for_auto_assign(p: Dict[str, Any]) -> bool:
@@ -225,9 +235,17 @@ def _waiting_entries_with_consultation(handle) -> List[Dict[str, Any]]:
     return out
 
 
-def drain_waiting_with_available_nurses(handle) -> Dict[str, Any]:
+def drain_waiting_with_available_nurses(
+    handle, prefer_nurse_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Atribui enfermeiros disponíveis a entradas em espera (FIFO global).
+    prefer_nurse_id: na primeira rodada, prioriza esse profissional (ex.: recém liberado ao encerrar teleconsulta).
+    """
     assignments: List[Dict[str, Any]] = []
     used_nurse_ids: set = set()
+    prefer = (prefer_nurse_id or "").strip()
+    first_pass = True
 
     while True:
         nurses = [
@@ -235,6 +253,11 @@ def drain_waiting_with_available_nurses(handle) -> Dict[str, Any]:
             for n in list_available_nurses(handle)
             if n.get("professional_id") not in used_nurse_ids
         ]
+        if first_pass and prefer:
+            preferred = [n for n in nurses if (n.get("professional_id") or "") == prefer]
+            others = [n for n in nurses if (n.get("professional_id") or "") != prefer]
+            nurses = preferred + others
+        first_pass = False
         if not nurses:
             break
 
