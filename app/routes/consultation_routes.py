@@ -58,6 +58,10 @@ def _consultation_filters_from_request_args(args):
         low = key.lower()
         if low == "session":
             field = "session_hash"
+        elif low in ("id",):
+            field = "consultation_id"
+        elif low in ("hash",):
+            field = "session_hash"
         elif low in ("cpf", "patient_doc"):
             field = "patient_document"
         elif low in ("doc_profissional", "professional_doc"):
@@ -93,6 +97,20 @@ def _consultation_matches_field(c, field: str, value: str) -> bool:
     return str(stored).strip().lower() == value.strip().lower()
 
 
+def _ensure_doctor_link_for_public(consultation: dict) -> dict:
+    """
+    Garante doctor_link no payload público (útil para registros legados).
+    """
+    if not isinstance(consultation, dict):
+        return consultation
+    c = dict(consultation)
+    if not (c.get("doctor_link") or "").strip():
+        sh = (c.get("session_hash") or "").strip()
+        if sh:
+            c["doctor_link"] = create_doctor_url(sh)
+    return c
+
+
 def _list_consultations_filtered(handle, filters: dict):
     consultations = handle.find("consultations")
     if not filters:
@@ -111,7 +129,10 @@ def _list_consultations_filtered(handle, filters: dict):
         "status": "success",
         "filters": filters,
         "total": len(filtered),
-        "consultations": [consultation_for_public_response(c) for c in filtered],
+        "consultations": [
+            consultation_for_public_response(_ensure_doctor_link_for_public(c))
+            for c in filtered
+        ],
     }, 200
 
 
@@ -615,6 +636,8 @@ class SearchConsultation(Resource):
                     )
                     handle.save("consultations", teleatendimento)
 
+            teleatendimento = _ensure_doctor_link_for_public(teleatendimento)
+
             return {
                 'message': 'Teleatendimento encontrado com sucesso',
                 'status': 'success',
@@ -654,7 +677,10 @@ class SearchConsultationByPatient(Resource):
             return {
                 'message': f'{len(teleatendimentos)} teleatendimento(s) encontrado(s) para este paciente',
                 'status': 'success',
-                'teleatendimentos': [consultation_for_public_response(t) for t in teleatendimentos],
+                'teleatendimentos': [
+                    consultation_for_public_response(_ensure_doctor_link_for_public(t))
+                    for t in teleatendimentos
+                ],
                 'patient_document': patient_document
             }, 200
             
@@ -717,7 +743,10 @@ class SearchConsultationByProfessional(Resource):
             return {
                 'message': f'{len(teleatendimentos)} teleatendimento(s) encontrado(s) para este profissional',
                 'status': 'success',
-                'teleatendimentos': [consultation_for_public_response(t) for t in teleatendimentos],
+                'teleatendimentos': [
+                    consultation_for_public_response(_ensure_doctor_link_for_public(t))
+                    for t in teleatendimentos
+                ],
                 'professional_document': doc,
             }, 200
 

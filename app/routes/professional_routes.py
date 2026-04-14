@@ -277,6 +277,8 @@ class CreateProfessional(Resource):
         credential = clean_document(data.get('credential', ''))
         professional_document = clean_document(data.get('professional_document', ''))
         specialty = data.get('specialty', '').strip()
+        availability_raw = data.get("availability")
+        availability = canonical_professional_availability(availability_raw)
         
         # Validation
         if not name:
@@ -302,6 +304,17 @@ class CreateProfessional(Resource):
             }, 400
 
         profession = canonical_profession(profession)
+
+        if availability_raw is not None and str(availability_raw).strip() and not availability:
+            return {
+                'message': 'availability inválido',
+                'status': 'error',
+                'valid_availability': PROFESSIONAL_AVAILABILITY_CHOICES,
+                'labels': PROFESSIONAL_AVAILABILITY_LABELS,
+            }, 400
+
+        if not availability:
+            availability = "available"
 
         if profession == PHYSICIAN_PROFESSION:
             if not credential:
@@ -349,15 +362,30 @@ class CreateProfessional(Resource):
             profession=profession,
             credential=credential,
             professional_document=professional_document,
-            specialty=specialty
+            specialty=specialty,
+            availability=availability,
         )
         professional_data = professional.to_dict()
 
         handle.save("professionals", professional_data)
 
+        auto_assignment = None
+        auto_assignments = []
+        if profession == NURSE_PROFESSION and availability == "available":
+            drain = drain_waiting_with_available_nurses(handle)
+            auto_assignments = drain.get("assignments") or []
+            pid = professional_data.get("professional_id")
+            auto_assignment = next(
+                (a for a in auto_assignments if a.get("nurse_id") == pid),
+                None,
+            )
+
         return {
             'message': 'Professional created successfully',
-            'professional': convert_to_serializable(professional_data)
+            'status': 'success',
+            'professional': convert_to_serializable(professional_data),
+            'auto_assignment': convert_to_serializable(auto_assignment),
+            'auto_assignments': convert_to_serializable(auto_assignments),
         }, 201
     
 @ns.route('listar')

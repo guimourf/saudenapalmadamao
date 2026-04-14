@@ -217,6 +217,7 @@ def assign_nurse_to_waiting_entry(
         "entry_id": entry.get("entry_id"),
         "consultation_hash": consultation_hash,
         "queue_id": queue_id,
+        "doctor_link": tele.get("doctor_link") or create_doctor_url(consultation_hash),
     }
 
 
