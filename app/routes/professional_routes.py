@@ -84,11 +84,7 @@ def _dedupe_professionals_by_id(professionals):
     return list(by_id.values()) + no_id
 
 def _filters_from_request_args(args):
-    """
-    Cada ?nome=valor vira filtro no documento (AND entre todos).
-    Nome do parâmetro vira minúsculo (availability e Availability são o mesmo campo).
-    Alias: profissao → profession.
-    """
+
     aliases = {"profissao": "profession"}
     out = {}
     for key in args:
@@ -106,7 +102,6 @@ _INT_FILTER_FIELDS = frozenset({"position", "priority"})
 
 
 def _profession_matches_field(prof, field: str, value: str) -> bool:
-    """Compara valor da query com prof[field]. Documento: só dígitos; availability: canônico + sinónimos."""
     if field == "professional_document":
         return clean_document(str(prof.get(field) or "")) == clean_document(value)
 
@@ -145,7 +140,6 @@ def _profession_matches_field(prof, field: str, value: str) -> bool:
 
 
 def _professional_ids_with_consultation_queue_position(handle, position: int) -> set:
-    """professional_id presente em teleconsulta com queue_position == position."""
     allowed: set = set()
     for c in handle.find("consultations"):
         try:

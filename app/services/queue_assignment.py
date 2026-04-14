@@ -27,7 +27,6 @@ def _clean_professional_document(value: Any) -> str:
 def find_consultations_by_session_hash(
     handle, session_hash: str
 ) -> List[Dict[str, Any]]:
-    """Busca por session_hash com fallback case-insensitive (registros legados)."""
     ch = normalize_session_hash(session_hash)
     if not ch:
         return []
@@ -41,7 +40,6 @@ def find_consultations_by_session_hash(
 
 
 def mark_consultation_queue_position_cleared(handle, consultation_hash: str) -> None:
-    """Teleconsulta não está mais na fila de espera (ex.: remoção manual da fila)."""
     ch = normalize_session_hash(consultation_hash)
     if not ch:
         return
@@ -55,7 +53,6 @@ def mark_consultation_queue_position_cleared(handle, consultation_hash: str) -> 
 
 
 def sync_queue_entry_positions_to_consultations(handle, queue_id: str) -> None:
-    """Atualiza queue_position nas teleconsultas ligadas às entradas em espera desta fila."""
     qid = (queue_id or "").strip()
     if not qid:
         return
@@ -77,7 +74,6 @@ def sync_queue_entry_positions_to_consultations(handle, queue_id: str) -> None:
 
 
 def coerce_professional_cadastro_status(prof: Dict[str, Any]) -> None:
-    """Garante status de cadastro em active/inactive (corrige valores legados ex.: indisponivel no campo errado)."""
     st = (prof.get("status") or "").strip().lower()
     if st in PROFESSIONAL_STATUS_CHOICES:
         prof["status"] = st
@@ -87,7 +83,6 @@ def coerce_professional_cadastro_status(prof: Dict[str, Any]) -> None:
 
 
 def _normalize_professional_availability_no_persist(prof: Dict[str, Any]) -> Dict[str, Any]:
-    """Mesma regra de professional_routes, sem gravar (evita I/O no drain)."""
     raw = prof.get("availability")
     canon = canonical_professional_availability(raw) if raw else None
     if canon:
@@ -106,7 +101,6 @@ def _normalize_professional_availability_no_persist(prof: Dict[str, Any]) -> Dic
 def set_professional_availability_by_id(
     handle, professional_id: str, availability_value: str
 ) -> None:
-    """Persiste availability canônica (ex.: busy ao entrar na teleconsulta, available ao encerrar)."""
     pid = (professional_id or "").strip()
     if not pid:
         return
@@ -132,7 +126,6 @@ def _nurse_eligible_for_auto_assign(p: Dict[str, Any]) -> bool:
 
 
 def list_nurses_marked_available(handle) -> List[Dict[str, Any]]:
-    """Enfermeiras com cadastro ativo e availability `available` (não busy / unavailable / on_break)."""
     buckets: Dict[str, List[Dict[str, Any]]] = {}
     for raw in handle.find("professionals"):
         if canonical_profession(raw.get("profession")) != NURSE_PROFESSION:
@@ -162,7 +155,6 @@ def list_nurses_marked_available(handle) -> List[Dict[str, Any]]:
 
 
 def list_available_nurses(handle) -> List[Dict[str, Any]]:
-    """Enfermeiras elegíveis para auto-atribuição (mesmo critério de profissional_disponiveis / availability)."""
     return list_nurses_marked_available(handle)
 
 
@@ -175,7 +167,6 @@ def _recalc_positions(handle, queue_id: str) -> None:
 def assign_nurse_to_waiting_entry(
     handle, nurse: Dict[str, Any], entry: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
-    """Associa enfermeira à teleconsulta da entrada e remove a entrada da espera."""
     consultation_hash = normalize_session_hash(entry.get("consultation_hash"))
     if not consultation_hash:
         return None
@@ -235,10 +226,6 @@ def _waiting_entries_with_consultation(handle) -> List[Dict[str, Any]]:
 
 
 def drain_waiting_with_available_nurses(handle) -> Dict[str, Any]:
-    """
-    Enquanto houver enfermeira disponível e paciente em espera com teleconsulta (hash),
-    atribui em ordem FIFO global. Cada enfermeira só um paciente por iteração até esgotar.
-    """
     assignments: List[Dict[str, Any]] = []
     used_nurse_ids: set = set()
 
